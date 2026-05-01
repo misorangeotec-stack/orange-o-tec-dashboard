@@ -266,10 +266,7 @@ export default function Dashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Business overview as on {dashboard?.asOfDate ? formatDateDMY(dashboard.asOfDate) : "—"}
-          </p>
-          <p className="text-[11px] text-muted-foreground/80 italic mt-0.5">
+          <p className="text-[11px] text-muted-foreground/80 italic mt-1">
             Note: "Blocked" is set when the source-sheet credit limit equals 1. In practice this marker is used for the INK product category only.
           </p>
         </div>
