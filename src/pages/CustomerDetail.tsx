@@ -650,12 +650,14 @@ export default function CustomerDetail() {
     destructive?: boolean;
     onClick?: () => void;
     active?: boolean;
+    drCr?: 'debit' | 'credit';
   };
 
   const summaryItems: SummaryItem[] = [
     {
       label: "Outstanding",
       value: fmt(customer.outstanding),
+      drCr: 'debit',
       onClick: () => applyKpiFilter("sales", "all"),
       active: isKpiActive("sales", "all"),
     },
@@ -663,6 +665,7 @@ export default function CustomerDetail() {
       label: "Overdue",
       value: fmt(customer.overdue),
       destructive: true,
+      drCr: 'debit',
       onClick: () => applyKpiFilter("sales", "overdue"),
       active: isKpiActive("sales", "overdue"),
     },
@@ -671,7 +674,8 @@ export default function CustomerDetail() {
     { label: "Credit Period",  value: `${customer.creditPeriod} days` },
     {
       label: "Opening Balance",
-      value: `${fmt(Math.abs(customer.openingBalance))} (${customer.openingDrCr ?? 'Dr'})`,
+      value: fmt(Math.abs(customer.openingBalance)),
+      drCr: (customer.openingDrCr ?? 'Dr') === 'Dr' ? 'debit' : 'credit',
       onClick: () => {
         setObOpen(true);
         setTimeout(() => {
@@ -683,18 +687,21 @@ export default function CustomerDetail() {
     {
       label: "Sales",
       value: fmtINRMoney(customer.sales),
+      drCr: 'debit',
       onClick: () => applyKpiFilter("sales", "all"),
       active: isKpiActive("sales", "all"),
     },
     {
       label: "Receipts",
       value: fmtINRMoney(customer.receipts),
+      drCr: 'credit',
       onClick: () => applyKpiFilter("receipt", "all"),
       active: isKpiActive("receipt", "all"),
     },
     {
       label: "Credit Notes",
       value: fmtINRMoney(customer.creditNotes),
+      drCr: 'credit',
       onClick: () => applyKpiFilter("credit_note", "all"),
       active: isKpiActive("credit_note", "all"),
     },
@@ -702,6 +709,7 @@ export default function CustomerDetail() {
       label: "Debit Notes",
       value: fmtINRMoney(debitNotesAmt),
       destructive: debitNotesAmt > 0,
+      drCr: 'debit',
       onClick: debitNotesAmt > 0 ? () => applyKpiFilter("debit_note", "all") : undefined,
       active: isKpiActive("debit_note", "all"),
     },
@@ -709,6 +717,7 @@ export default function CustomerDetail() {
       label: "Journal Adj (Net)",
       value: fmtINRDrCr(journalAdjAmt),
       destructive: journalAdjAmt > 0,
+      drCr: journalAdjAmt > 0 ? 'debit' : journalAdjAmt < 0 ? 'credit' : undefined,
       onClick: journalAdjAmt !== 0 ? () => applyKpiFilter("journal", "all") : undefined,
       active: isKpiActive("journal", "all"),
     },
@@ -716,6 +725,7 @@ export default function CustomerDetail() {
       label: "Cheque Returns",
       value: fmtINRMoney(checkReturnsAmt),
       destructive: checkReturnsAmt > 0,
+      drCr: 'debit',
       onClick: checkReturnsAmt > 0 ? () => applyKpiFilter("check_return", "all") : undefined,
       active: isKpiActive("check_return", "all"),
     },
@@ -901,6 +911,9 @@ export default function CustomerDetail() {
               {item.value}
             </p>
           );
+          const drCrEl = item.drCr ? (
+            <p className="text-[10px] text-muted-foreground leading-none mt-0.5">({item.drCr})</p>
+          ) : null;
           if (clickable) {
             return (
               <button
@@ -912,6 +925,7 @@ export default function CustomerDetail() {
                 <div className={innerCls}>
                   {labelEl}
                   {valueEl}
+                  {drCrEl}
                 </div>
               </button>
             );
@@ -921,6 +935,7 @@ export default function CustomerDetail() {
               <div className={innerCls}>
                 {labelEl}
                 {valueEl}
+                {drCrEl}
               </div>
             </div>
           );
