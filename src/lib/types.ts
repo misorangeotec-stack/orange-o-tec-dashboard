@@ -39,6 +39,7 @@ export interface Customer {
   /** True when the source-sheet Credit Limit equals 1 (the "blocked" sentinel). */
   blocked: boolean;
   openingBalance: number;
+  openingDrCr?: 'Dr' | 'Cr';
   remainingOpeningBalance: number;
   advanceBalance: number;
   advanceBreakdown: AdvanceBreakdown;

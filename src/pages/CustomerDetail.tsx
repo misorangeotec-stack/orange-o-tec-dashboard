@@ -671,7 +671,7 @@ export default function CustomerDetail() {
     { label: "Credit Period",  value: `${customer.creditPeriod} days` },
     {
       label: "Opening Balance",
-      value: fmt(customer.openingBalance),
+      value: `${fmt(Math.abs(customer.openingBalance))} (${customer.openingDrCr ?? 'Dr'})`,
       onClick: () => {
         setObOpen(true);
         setTimeout(() => {
@@ -1333,15 +1333,22 @@ export default function CustomerDetail() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
               <p className="text-xs text-muted-foreground">Opening Balance (1-Apr-2025)</p>
-              <p className="text-lg font-bold text-foreground">{fmt(customer.openingBalance)}</p>
+              <p className="text-lg font-bold text-foreground">
+                {fmt(Math.abs(customer.openingBalance))}
+                <span className={`ml-1 text-sm font-medium ${customer.openingDrCr === 'Cr' ? 'text-green-600' : 'text-muted-foreground'}`}>
+                  {customer.openingDrCr ?? 'Dr'}
+                </span>
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Included in Outstanding</p>
-              <p className="text-lg font-bold text-foreground">Yes</p>
+              <p className="text-lg font-bold text-foreground">{customer.openingDrCr === 'Cr' ? 'Reduces' : 'Yes'}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Treated as Overdue Since</p>
-              <p className="text-lg font-bold text-destructive">1-Apr-2025</p>
+              <p className={`text-lg font-bold ${customer.openingDrCr === 'Cr' ? 'text-green-600' : 'text-destructive'}`}>
+                {customer.openingDrCr === 'Cr' ? 'N/A (Credit)' : '1-Apr-2025'}
+              </p>
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-3 p-2 bg-muted/50 rounded-input">

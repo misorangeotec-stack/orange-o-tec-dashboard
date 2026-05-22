@@ -97,6 +97,7 @@ function toCustomer(r: CustomerRow): Customer {
       ? null : Number(r.proposed_credit_limit_ai_delta_pct),
     proposedCreditLimitReason: r.proposed_credit_limit_reason ?? {},
     openingBalance: Number(r.opening_balance),
+    openingDrCr: Number(r.opening_balance) < 0 ? 'Cr' : 'Dr',
     remainingOpeningBalance: Number(r.remaining_opening_balance),
     obReceiptsApplied: Number(r.ob_receipts_applied),
     obCreditNotesApplied: Number(r.ob_credit_notes_applied),
