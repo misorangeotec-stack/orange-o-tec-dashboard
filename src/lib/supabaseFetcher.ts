@@ -248,6 +248,7 @@ export async function fetchInvoicesFromSupabase(fySuffix: string): Promise<Recor
       creditNotes: Number(r.credit_notes),
       debitNotes: Number(r.debit_notes),
       journalAdjustments: Number(r.journal_adjustments),
+      checkReturns:       Number(r.check_returns),
       outstanding: Number(r.outstanding),
       overdue: Number(r.overdue),
       maxOverdueDays: r.max_overdue_days,

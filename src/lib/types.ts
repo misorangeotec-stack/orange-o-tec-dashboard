@@ -205,6 +205,7 @@ export interface MonthlyTrend {
   creditNotes: number;
   debitNotes?: number;
   journalAdjustments?: number;
+  checkReturns?: number;
   outstanding: number;
   overdue: number;
   maxOverdueDays: number;

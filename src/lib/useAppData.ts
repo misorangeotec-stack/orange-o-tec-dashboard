@@ -779,7 +779,7 @@ export function useAppData(filters: Filters = {}): AppData {
       const s = Math.round((monthMap[tp.month]?.sales    ?? 0) * 100) / 100;
       const r = Math.round((monthMap[tp.month]?.receipts ?? 0) * 100) / 100;
       runningOS = Math.max(0, Math.round((runningOS + s - r) * 100) / 100);
-      return { month: tp.month, sales: s, receipts: r, outstanding: runningOS };
+      return { month: tp.month, sales: s, receipts: r, outstanding: runningOS, overdue: 0 };
     });
   }, [dashboard, customers, filteredCustomerDetail, saleTypeList]);
 
