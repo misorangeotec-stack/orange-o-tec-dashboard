@@ -1111,7 +1111,7 @@ export default function CustomerRiskRegister() {
           { label: "Debit Notes",        value: fmtINRMoney(totals.debitNotes),           icon: FileMinus,     warn: true  },
           { label: "Journal Adj (Net)",  value: fmtINRDrCr(totals.journalAdjustments),    icon: FileMinus,     warn: totals.journalAdjustments > 0 },
           { label: "Cheque Returns",     value: fmtINRMoney(totals.checkReturns),         icon: RotateCcw,     warn: true  },
-          { label: "Outstanding",        value: fmt(totals.outstanding),          icon: TrendingDown,  warn: true  },
+          { label: "Outstanding",        value: fmt(Math.abs(totals.outstanding)),          icon: TrendingDown,  warn: true  },
           { label: "Overdue",            value: fmt(totals.overdue),              icon: Clock,         warn: true  },
           { label: groupMode ? "Critical Groups" : "Critical Customers", value: String(totals.criticalCustomers), icon: ShieldAlert,   warn: true  },
           { label: "Over Credit Limit",  value: String(totals.overCreditLimit),   icon: AlertTriangle, warn: true  },
@@ -1249,7 +1249,7 @@ export default function CustomerRiskRegister() {
                 { label: "Total Receipts",    value: fmtL(aggregatedTrend.reduce((s, r) => s + r.receipts, 0)),           color: "text-[hsl(142,71%,45%)]" },
                 { label: "Total Cr. Notes",   value: fmtL(aggregatedTrend.reduce((s, r) => s + r.creditNotes, 0)),        color: "text-[hsl(271,75%,58%)]" },
                 { label: "Total Chq Returns", value: fmtL(aggregatedTrend.reduce((s, r) => s + r.checkReturns, 0)),       color: "text-[hsl(213,94%,52%)]" },
-                { label: "Outstanding",       value: fmt(totals.outstanding), color: "text-secondary" },
+                { label: "Outstanding",       value: fmt(Math.abs(totals.outstanding)), color: "text-secondary" },
                 { label: "Overdue",           value: fmt(totals.overdue),    color: "text-destructive" },
               ].map((item) => (
                 <div key={item.label} className="bg-muted/40 rounded-input px-3 py-2">
@@ -1350,7 +1350,10 @@ export default function CustomerRiskRegister() {
                         </TableCell>
                       )}
                       {visibleCols.has("outstanding") && (
-                        <TableCell className="text-sm text-right font-mono font-semibold">{fmt(r.outstanding)}</TableCell>
+                        <TableCell className={`text-sm text-right font-mono font-semibold ${r.outstanding < 0 ? "text-emerald-600" : ""}`}>
+                          {fmt(Math.abs(r.outstanding))}
+                          {r.outstanding < 0 && <span className="text-[10px] font-normal ml-0.5">(Cr)</span>}
+                        </TableCell>
                       )}
                       {visibleCols.has("overdue") && (
                         <TableCell className={`text-sm text-right font-mono ${r.overdue > 0 ? "text-destructive font-semibold" : ""}`}>

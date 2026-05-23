@@ -179,8 +179,8 @@ export function SaleTypeReconciliationTable({ breakdown }: Props) {
                     {row.type === "unmapped" ? (
                       <TableCell className="text-right text-muted-foreground">—</TableCell>
                     ) : (
-                      <TableCell className={`text-right tabular-nums font-semibold ${row.outstanding > 0 ? "text-destructive" : ""}`}>
-                        {row.outstanding > 0 ? fmt(row.outstanding) : "—"}
+                      <TableCell className={`text-right tabular-nums font-semibold ${row.outstanding !== 0 ? "text-destructive" : ""}`}>
+                        {row.outstanding !== 0 ? fmt(Math.abs(row.outstanding)) : "—"}
                       </TableCell>
                     )}
 
@@ -210,7 +210,7 @@ export function SaleTypeReconciliationTable({ breakdown }: Props) {
                   <AmtCell value={breakdown.total.checkReturns}   className="font-semibold" />
                   <AmtCell value={breakdown.total.advanceBalance}  className="font-semibold" />
                   <TableCell className="text-right tabular-nums font-bold text-destructive">
-                    {breakdown.total.outstanding > 0 ? fmt(breakdown.total.outstanding) : "—"}
+                    {breakdown.total.outstanding !== 0 ? fmt(Math.abs(breakdown.total.outstanding)) : "—"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-semibold text-amber-700">
                     {breakdown.total.overdue > 0 ? fmt(breakdown.total.overdue) : "—"}

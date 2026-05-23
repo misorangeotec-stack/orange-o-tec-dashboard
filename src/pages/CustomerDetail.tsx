@@ -608,7 +608,7 @@ export default function CustomerDetail() {
   }
 
   const utilization = customer.creditLimit > 0
-    ? Math.round((customer.outstanding / customer.creditLimit) * 100)
+    ? Math.round((Math.max(0, customer.outstanding) / customer.creditLimit) * 100)
     : 0;
 
   // ── KPI tile filter handler — same UX as the trend-strip tiles ──
@@ -656,8 +656,8 @@ export default function CustomerDetail() {
   const summaryItems: SummaryItem[] = [
     {
       label: "Outstanding",
-      value: fmt(customer.outstanding),
-      drCr: 'debit',
+      value: fmt(Math.abs(customer.outstanding)),
+      drCr: customer.outstanding >= 0 ? 'debit' : 'credit',
       onClick: () => applyKpiFilter("sales", "all"),
       active: isKpiActive("sales", "all"),
     },
@@ -1059,7 +1059,7 @@ export default function CustomerDetail() {
               { label: "Total Dr. Notes",   value: fmtL(trendData.reduce((s, r) => s + (r.debitNotes ?? 0), 0)),                  color: "text-[hsl(28,80%,55%)]",       filter: { voucherType: "debit_note",   status: "all" }     },
               { label: "Journal Adj (Net)", value: fmtLDrCr(trendData.reduce((s, r) => s + (r.journalAdjustments ?? 0), 0)),      color: "text-[hsl(231,65%,55%)]",      filter: { voucherType: "journal",      status: "all" }     },
               { label: "Total Chq Returns", value: fmtL(trendData.reduce((s, r) => s + r.checkReturns, 0)),                       color: "text-[hsl(213,94%,52%)]",      filter: { voucherType: "check_return", status: "all" }     },
-              { label: "Outstanding",       value: fmtL(trendData[trendData.length - 1]?.outstanding ?? 0),                       color: "text-secondary",               filter: { voucherType: "sales",        status: "all" }     },
+              { label: "Outstanding",       value: fmtL(Math.abs(trendData[trendData.length - 1]?.outstanding ?? 0)),                       color: "text-secondary",               filter: { voucherType: "sales",        status: "all" }     },
             ];
 
             const overdueFilter = { voucherType: "sales", status: "overdue" };
@@ -1297,7 +1297,7 @@ export default function CustomerDetail() {
                         {fmtLDrCr(row.journalAdjustments ?? 0)}
                       </TableCell>
                       <TableCell className="text-sm text-right font-mono text-[hsl(213,94%,52%)] font-semibold">{fmtL(row.checkReturns)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono">{fmtL(row.outstanding)}</TableCell>
+                      <TableCell className="text-sm text-right font-mono">{fmtL(Math.abs(row.outstanding))}</TableCell>
                       <TableCell className="text-sm text-right font-mono text-destructive font-semibold">{fmtL(row.overdue)}</TableCell>
                     </TableRow>
                   ))}
@@ -1316,7 +1316,7 @@ export default function CustomerDetail() {
                       );
                     })()}
                     <TableCell className="text-sm text-right font-mono font-bold text-[hsl(213,94%,52%)]">{fmtL(trendData.reduce((s, r) => s + r.checkReturns, 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData[trendData.length - 1]?.outstanding ?? 0)}</TableCell>
+                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(Math.abs(trendData[trendData.length - 1]?.outstanding ?? 0))}</TableCell>
                     <TableCell className="text-sm text-right font-mono font-bold text-destructive">{fmtL(trendData[trendData.length - 1]?.overdue ?? 0)}</TableCell>
                   </TableRow>
                 </>
@@ -1654,7 +1654,7 @@ export default function CustomerDetail() {
                   { label: "+ Debit Notes",       value: fmtL((ledgerTrendRow as any).debitNotes ?? 0),                  sub: "billed extra", dn: true },
                   { label: "± Journal (Net)",     value: fmtLDrCr((ledgerTrendRow as any).journalAdjustments ?? 0),     sub: "Dr − Cr", jn: true },
                   { label: "+ Chq Returns",       value: fmtL(ledgerTrendRow.checkReturns),                            sub: "bounced cheques", chq: true },
-                  { label: "Closing Outstanding", value: fmtL(ledgerTrendRow.outstanding),                             sub: "end of month", closing: true },
+                  { label: "Closing Outstanding", value: fmtL(Math.abs(ledgerTrendRow.outstanding)),                             sub: "end of month", closing: true },
                 ].map((item) => (
                   <div
                     key={item.label}

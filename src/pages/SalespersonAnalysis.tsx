@@ -530,7 +530,7 @@ export default function SalespersonAnalysis() {
           { label: "Salespersons",      value: String(totals.salespersons), icon: UserCircle,   warn: false },
           { label: "Total Customers",   value: String(totals.customers),    icon: Users,        warn: false },
           { label: "Total Sales",       value: fmt(totals.sales),           icon: DollarSign,   warn: false },
-          { label: "Total Outstanding", value: fmt(totals.outstanding),     icon: TrendingDown, warn: true  },
+          { label: "Total Outstanding", value: fmt(Math.abs(totals.outstanding)),     icon: TrendingDown, warn: true  },
           { label: "Total Overdue",     value: fmt(totals.overdue),         icon: Clock,        warn: true  },
         ];
         return (
@@ -656,7 +656,7 @@ export default function SalespersonAnalysis() {
                     </TableCell>
                     <TableCell className="text-sm text-right font-mono border-l border-border">{pivotTotals.total.customers}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(pivotTotals.total.sales)}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{fmt(pivotTotals.total.outstanding)}</TableCell>
+                    <TableCell className="text-sm text-right font-mono">{fmt(Math.abs(pivotTotals.total.outstanding))}</TableCell>
                     <TableCell className={`text-sm text-right font-mono ${pivotTotals.total.overdue > 0 ? "text-destructive" : ""}`}>
                       {fmt(pivotTotals.total.overdue)}
                     </TableCell>
@@ -668,7 +668,7 @@ export default function SalespersonAnalysis() {
                           {slice.customers}
                         </TableCell>,
                         <TableCell key={`total-${risk}-os`} className="text-sm text-right font-mono">
-                          {hasData ? fmt(slice.outstanding) : "—"}
+                          {hasData ? fmt(Math.abs(slice.outstanding)) : "—"}
                         </TableCell>,
                         <TableCell key={`total-${risk}-od`} className={`text-sm text-right font-mono ${slice.overdue > 0 ? "text-destructive" : ""}`}>
                           {hasData ? fmt(slice.overdue) : "—"}
@@ -694,7 +694,7 @@ export default function SalespersonAnalysis() {
                       </TableCell>
                       <TableCell className="text-sm text-right font-mono border-l border-border">{row.total.customers}</TableCell>
                       <TableCell className="text-sm text-right font-mono">{fmt(row.total.sales)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono font-semibold">{fmt(row.total.outstanding)}</TableCell>
+                      <TableCell className="text-sm text-right font-mono font-semibold">{fmt(Math.abs(row.total.outstanding))}</TableCell>
                       <TableCell className={`text-sm text-right font-mono ${row.total.overdue > 0 ? "text-destructive font-semibold" : ""}`}>
                         {fmt(row.total.overdue)}
                       </TableCell>
@@ -716,7 +716,7 @@ export default function SalespersonAnalysis() {
                             className={`text-sm text-right font-mono ${baseCls}`}
                             onClick={() => handleCellClick(row.salesperson, risk, hasData)}
                           >
-                            {hasData ? fmt(slice.outstanding) : "—"}
+                            {hasData ? fmt(Math.abs(slice.outstanding)) : "—"}
                           </TableCell>,
                           <TableCell
                             key={`${row.salesperson}-${risk}-od`}
@@ -793,7 +793,7 @@ export default function SalespersonAnalysis() {
                     <TableCell className="text-sm text-muted-foreground/60">—</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(customerTotals.sales)}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(customerTotals.receipts)}</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{fmt(customerTotals.outstanding)}</TableCell>
+                    <TableCell className="text-sm text-right font-mono">{fmt(Math.abs(customerTotals.outstanding))}</TableCell>
                     <TableCell className={`text-sm text-right font-mono ${customerTotals.overdue > 0 ? "text-destructive" : ""}`}>
                       {fmt(customerTotals.overdue)}
                     </TableCell>
@@ -812,7 +812,7 @@ export default function SalespersonAnalysis() {
                     <TableCell className="text-sm whitespace-nowrap">{row.salesPersons?.join(", ") ?? row.salesPerson}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(row.sales)}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(row.receipts)}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-semibold">{fmt(row.outstanding)}</TableCell>
+                    <TableCell className="text-sm text-right font-mono font-semibold">{fmt(Math.abs(row.outstanding))}</TableCell>
                     <TableCell className={`text-sm text-right font-mono ${row.overdue > 0 ? "text-destructive font-semibold" : ""}`}>
                       {fmt(row.overdue)}
                     </TableCell>
