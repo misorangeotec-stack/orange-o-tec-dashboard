@@ -159,6 +159,8 @@ export interface GroupedCustomer extends ConsolidatedCustomer {
 export interface Invoice {
   id: string;
   number: string;
+  billRefName: string;
+  billType: string;
   date: string;
   amount: number;
   receiptAdj: number;
@@ -170,6 +172,7 @@ export interface Invoice {
   overdueDays: number;
   status: InvoiceStatus;
   voucherType: SaleType;
+  isCarryforward: boolean;
 }
 
 export interface DebitNoteTransaction {

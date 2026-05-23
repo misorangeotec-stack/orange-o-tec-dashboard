@@ -235,15 +235,20 @@ export default function CustomerDetail() {
 
   const isConsolidated = allEntities.length > 1 && activeEntities.length > 1;
 
-  // Merged invoices from all active entities (sorted by date)
+  // Merged invoices from all active entities (sorted by date).
+  // Agst Ref lines are Tally's internal advance-application bookkeeping entries
+  // (always negative amounts). They must be excluded from the display — the
+  // corresponding advance receipt row already appears in receiptTransactions.
   const invoices = useMemo(() =>
     activeEntities
       .flatMap((e) =>
-        (customerDetail[e.id]?.invoices ?? []).map((inv) => ({
-          ...inv,
-          _company:  e.company,
-          _location: e.location,
-        }))
+        (customerDetail[e.id]?.invoices ?? [])
+          .filter((inv) => inv.billType !== "Agst Ref" && inv.amount > 0)
+          .map((inv) => ({
+            ...inv,
+            _company:  e.company,
+            _location: e.location,
+          }))
       )
       .sort((a, b) => a.date.localeCompare(b.date)),
     [activeEntities, customerDetail],
@@ -1512,7 +1517,8 @@ export default function CustomerDetail() {
                   <TableRow className="bg-primary/5 border-b-2 border-primary/20 font-semibold sticky top-0">
                     <TableCell className="text-xs font-bold text-primary tracking-wide" colSpan={colSpan}>
                       <span className="uppercase">Total ({filteredTransactions.length})</span>
-                      {" — Dr "}{fmtINRMoney(totPos)}{" · Cr "}{fmtINRMoney(Math.abs(totNeg))}
+                      {" — Dr "}{fmtINRMoney(totPos)}
+                      {totNeg < 0 && <>{" · Cr "}{fmtINRMoney(Math.abs(totNeg))}</>}
                     </TableCell>
                     <TableCell className="text-sm text-right font-mono font-bold text-foreground">{fmt(totAmount)}</TableCell>
                     <TableCell className={`text-sm text-right font-mono font-bold ${totNet > 0 ? "text-destructive" : totNet < 0 ? "text-emerald-700" : "text-foreground"}`}>
