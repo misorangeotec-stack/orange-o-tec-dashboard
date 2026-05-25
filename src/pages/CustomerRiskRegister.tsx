@@ -87,6 +87,7 @@ interface CustomerRow {
 type ViewMode = "customer" | "group";
 
 import { fmtINRMoney, fmtINRDrCr } from "@/lib/utils";
+import { sumOutstanding } from "@/lib/receivables";
 
 const fmt = (n: number) => {
   const sign = n < 0 ? "-" : "";
@@ -743,7 +744,7 @@ export default function CustomerRiskRegister() {
     debitNotes:        rows.reduce((s, r) => s + (r.debitNotes ?? 0), 0),
     journalAdjustments: rows.reduce((s, r) => s + (r.journalAdjustments ?? 0), 0),
     checkReturns:      rows.reduce((s, r) => s + (r.checkReturns ?? 0), 0),
-    outstanding:       rows.reduce((s, r) => s + r.outstanding, 0),
+    outstanding:       sumOutstanding(rows),
     overdue:           agingBucketKey
                          ? rows.reduce((s, r) => s + (r.agingBuckets?.[agingBucketKey] ?? 0), 0)
                          : rows.reduce((s, r) => s + r.overdue, 0),

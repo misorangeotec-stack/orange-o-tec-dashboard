@@ -27,6 +27,7 @@ import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import type { AgingBuckets } from "@/lib/types";
 import { ShareReportMenu } from "@/pages/salesperson/ShareReportMenu";
 import type { ActiveFiltersSummary } from "@/lib/exportSalesperson";
+import { sumOutstanding } from "@/lib/receivables";
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -269,7 +270,7 @@ export default function SalespersonAnalysis() {
     salespersons: new Set(filteredRows.map((r) => r.salesPerson || "Others")).size,
     customers:    filteredRows.length,
     sales:        filteredRows.reduce((s, r) => s + r.sales, 0),
-    outstanding:  filteredRows.reduce((s, r) => s + r.outstanding, 0),
+    outstanding:  sumOutstanding(filteredRows),
     overdue:      filteredRows.reduce((s, r) => s + r.overdue, 0),
   }), [filteredRows]);
 
@@ -278,7 +279,7 @@ export default function SalespersonAnalysis() {
     count:       customerRows.length,
     sales:       customerRows.reduce((s, r) => s + r.sales, 0),
     receipts:    customerRows.reduce((s, r) => s + r.receipts, 0),
-    outstanding: customerRows.reduce((s, r) => s + r.outstanding, 0),
+    outstanding: sumOutstanding(customerRows),
     overdue:     customerRows.reduce((s, r) => s + r.overdue, 0),
   }), [customerRows]);
 

@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import JSZip from "jszip";
 import type { AgingBuckets } from "@/lib/types";
+import { sumOutstanding } from "@/lib/receivables";
 
 export type RiskCategory = "critical" | "high" | "medium" | "low";
 
@@ -118,7 +119,7 @@ function buildSummarySheet(opts: BuildWorkbookOptions): XLSX.WorkSheet {
     salespersons: new Set(customers.map(c => c.salesPerson || "Others")).size,
     customers: customers.length,
     sales: customers.reduce((s, c) => s + c.sales, 0),
-    outstanding: customers.reduce((s, c) => s + c.outstanding, 0),
+    outstanding: sumOutstanding(customers),
     overdue: customers.reduce((s, c) => s + c.overdue, 0),
   };
 
@@ -258,7 +259,7 @@ function buildCustomersSheet(opts: BuildWorkbookOptions): XLSX.WorkSheet {
     customers.reduce((s, c) => s + c.sales, 0),
     customers.reduce((s, c) => s + c.receipts, 0),
     customers.reduce((s, c) => s + c.creditNotes, 0),
-    customers.reduce((s, c) => s + c.outstanding, 0),
+    sumOutstanding(customers),
     customers.reduce((s, c) => s + c.overdue, 0),
     "", "", "",  "",
     customers.reduce((s, c) => s + (c.agingBuckets?.["0_30"]   ?? 0), 0),

@@ -34,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAppData, consolidateByName, consolidateByGroup } from "@/lib/useAppData";
+import { utilizationPct } from "@/lib/receivables";
 import type { InvoiceStatus } from "@/lib/types";
 
 /* ── Types ─────────────────────────────────────────────── */
@@ -612,9 +613,7 @@ export default function CustomerDetail() {
     );
   }
 
-  const utilization = customer.creditLimit > 0
-    ? Math.round((Math.max(0, customer.outstanding) / customer.creditLimit) * 100)
-    : 0;
+  const utilization = utilizationPct(customer);
 
   // ── KPI tile filter handler — same UX as the trend-strip tiles ──
   // Clicking a tile applies a transactions filter, expands the ledger,

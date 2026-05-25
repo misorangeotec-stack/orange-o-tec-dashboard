@@ -8,6 +8,7 @@ import type {
   CustomerGroupMap, GroupedCustomer,
 } from "./types";
 import { useFY } from "./fyContext";
+import { outstandingContribution, sumOutstanding, countByRisk, utilizationPct } from "./receivables";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -31,9 +32,7 @@ export function consolidateByName(customers: Customer[]): ConsolidatedCustomer[]
     const outstanding   = numSum("outstanding");
     const creditLimit   = Math.max(...entries.map((c) => c.creditLimit ?? 0));
     const maxOverdueDays = Math.max(...entries.map((c) => c.maxOverdueDays));
-    const utilization   = creditLimit > 0
-      ? Math.round(outstanding / creditLimit * 1000) / 10
-      : 0;
+    const utilization   = utilizationPct({ outstanding, creditLimit });
     const risk = categorizeRisk(maxOverdueDays, utilization);
 
     const proposedCreditLimit3M = numSum("proposedCreditLimit3M");
@@ -158,9 +157,7 @@ export function consolidateByGroup(
     const creditLimit   = Math.max(...children.map((c) => c.creditLimit ?? 0));
     const creditPeriod  = Math.max(...children.map((c) => c.creditPeriod ?? 0));
     const maxOverdueDays = Math.max(...children.map((c) => c.maxOverdueDays ?? 0));
-    const utilization   = creditLimit > 0
-      ? Math.round((outstanding / creditLimit) * 1000) / 10
-      : 0;
+    const utilization   = utilizationPct({ outstanding, creditLimit });
     const risk = categorizeRisk(maxOverdueDays, utilization);
 
     // Sum proposed limits across children; recompute deltas vs the (max-of-children) creditLimit.
@@ -528,7 +525,7 @@ export function useAppData(filters: Filters = {}): AppData {
         agstRefExcess: segmentedConsolidatedCustomers.reduce((s, c) => s + (c.advanceBreakdown?.agstRefExcess ?? 0), 0),
         creditNotes:   segmentedConsolidatedCustomers.reduce((s, c) => s + (c.advanceBreakdown?.creditNotes   ?? 0), 0),
       } as AdvanceBreakdown,
-      totalOutstanding:             segmentedConsolidatedCustomers.reduce((s, c) => s + c.outstanding, 0),
+      totalOutstanding:             sumOutstanding(segmentedConsolidatedCustomers),
       totalOverdue:                 segmentedConsolidatedCustomers.reduce((s, c) => s + c.overdue, 0),
       totalCustomers:               segmentedConsolidatedCustomers.length,
       criticalCustomers:            segmentedConsolidatedCustomers.filter((c) => c.risk === "critical").length,
@@ -639,10 +636,10 @@ export function useAppData(filters: Filters = {}): AppData {
     };
 
     if (!saleTypeList.length) {
-      // % of customers by risk category
-      const total = projectedCustomers.length;
-      const counts: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
-      projectedCustomers.forEach((c) => { counts[c.risk] = (counts[c.risk] ?? 0) + 1; });
+      // % of customers by risk category — same in-view set as the KPI tiles, every
+      // customer counted (no exposure gate) so band counts sum to Total Customers.
+      const total = segmentedConsolidatedCustomers.length;
+      const counts: Record<string, number> = countByRisk(segmentedConsolidatedCustomers);
       return ["low", "medium", "high", "critical"].map((r) => ({
         name:  r.charAt(0).toUpperCase() + r.slice(1),
         value: total > 0 ? Math.round((counts[r] ?? 0) / total * 1000) / 10 : 0,
@@ -651,15 +648,15 @@ export function useAppData(filters: Filters = {}): AppData {
       }));
     } else {
       // % of outstanding amount by risk category (projected to the selected sale type)
-      const totalOutstanding = projectedCustomers.reduce((s, c) => s + c.outstanding, 0);
+      const totalOutstanding = sumOutstanding(segmentedConsolidatedCustomers);
       const byRisk: Record<string, { outstanding: number; count: number }> = {
         low:      { outstanding: 0, count: 0 },
         medium:   { outstanding: 0, count: 0 },
         high:     { outstanding: 0, count: 0 },
         critical: { outstanding: 0, count: 0 },
       };
-      projectedCustomers.forEach((c) => {
-        byRisk[c.risk].outstanding += c.outstanding;
+      segmentedConsolidatedCustomers.forEach((c) => {
+        byRisk[c.risk].outstanding += outstandingContribution(c);
         byRisk[c.risk].count       += 1;
       });
       return ["low", "medium", "high", "critical"].map((r) => ({
@@ -671,11 +668,13 @@ export function useAppData(filters: Filters = {}): AppData {
         color: colors[r],
       }));
     }
-  }, [projectedCustomers, saleTypeList]);
+  }, [segmentedConsolidatedCustomers, saleTypeList]);
 
   // ── Top risky customers from filtered list ───────────────────────────────────
   const topRiskyCustomers = useMemo<TopRiskyCustomer[]>(() => {
-    return [...projectedCustomers]
+    // Same in-view set as the KPIs / register (consolidated by name), so the
+    // "top risky" list never shows a customer the register has merged away.
+    return [...segmentedConsolidatedCustomers]
       .filter((c) => c.overdue > 0)
       .sort((a, b) => b.overdue - a.overdue)
       .slice(0, 10)
@@ -689,7 +688,7 @@ export function useAppData(filters: Filters = {}): AppData {
         maxODDays:   c.maxOverdueDays,
         risk:        c.risk,
       }));
-  }, [projectedCustomers]);
+  }, [segmentedConsolidatedCustomers]);
 
   // ── Low collection rate customers (3M receipts < 30% of overdue) ─────────────
   const lowCollectionCustomers = useMemo<LowCollectionCustomer[]>(() => {
@@ -735,6 +734,14 @@ export function useAppData(filters: Filters = {}): AppData {
   const trend = useMemo<TrendPoint[]>(() => {
     const baseTrend = dashboard?.trend ?? [];
 
+    // The latest (as-of) point must equal the KPI cards exactly — same NET
+    // outstanding + total overdue, over the same in-view customer set. Historical
+    // months keep the backend's monthly trend (the only source for history).
+    // Trend chart unit is lakhs (rupees / 100_000); the display divides by 100 → Cr.
+    const asOfMonth = baseTrend.length ? baseTrend[baseTrend.length - 1].month : null;
+    const asOfOutstandingL = Math.round(sumOutstanding(segmentedConsolidatedCustomers) / 100_000 * 100) / 100;
+    const asOfOverdueL     = Math.round(segmentedConsolidatedCustomers.reduce((s, c) => s + c.overdue, 0) / 100_000 * 100) / 100;
+
     if (!saleTypeList.length) {
       // Aggregate monthly overdue from per-customer trends (company/location filtered)
       const custIds = new Set(customers.map((c) => c.id));
@@ -748,10 +755,9 @@ export function useAppData(filters: Filters = {}): AppData {
           }
         });
       });
-      return baseTrend.map((tp) => ({
-        ...tp,
-        overdue: overdueByMonth[tp.month] ?? 0,
-      }));
+      return baseTrend.map((tp) => tp.month === asOfMonth
+        ? { ...tp, outstanding: asOfOutstandingL, overdue: asOfOverdueL }
+        : { ...tp, overdue: overdueByMonth[tp.month] ?? 0 });
     }
 
     // Build a lookup keyed by month label (e.g. "Apr-25")
@@ -779,9 +785,11 @@ export function useAppData(filters: Filters = {}): AppData {
       const s = Math.round((monthMap[tp.month]?.sales    ?? 0) * 100) / 100;
       const r = Math.round((monthMap[tp.month]?.receipts ?? 0) * 100) / 100;
       runningOS = Math.max(0, Math.round((runningOS + s - r) * 100) / 100);
+      if (tp.month === asOfMonth)
+        return { month: tp.month, sales: s, receipts: r, outstanding: asOfOutstandingL, overdue: asOfOverdueL };
       return { month: tp.month, sales: s, receipts: r, outstanding: runningOS, overdue: 0 };
     });
-  }, [dashboard, customers, filteredCustomerDetail, saleTypeList]);
+  }, [dashboard, customers, filteredCustomerDetail, saleTypeList, segmentedConsolidatedCustomers]);
 
   // ── Outstanding by sale type (all 4 types; company/location filtered) ────────
   const outstandingByType = useMemo<Record<SaleType, number>>(() => {
@@ -820,7 +828,7 @@ export function useAppData(filters: Filters = {}): AppData {
     projectedCustomers.forEach((c) => {
       const key = `${c.company} · ${c.location}`;
       if (!map[key]) map[key] = { outstanding: 0, overdue: 0 };
-      map[key].outstanding += c.outstanding;
+      map[key].outstanding += outstandingContribution(c);
       map[key].overdue     += c.overdue;
     });
     return Object.entries(map)
@@ -844,8 +852,8 @@ export function useAppData(filters: Filters = {}): AppData {
         if (month === asOfMonth) {
           // As-of month: use customers.json data directly → exact KPI match
           for (const c of segmentedConsolidatedCustomers) {
-            if (c.outstanding <= 0) continue;
-            bucket[c.risk] += Math.round(c.outstanding / 1000) / 100;  // Rupees → Lakhs (2dp)
+            // NET: credit balances (outstanding < 0) subtract here too — see receivables.ts
+            bucket[c.risk] += Math.round(outstandingContribution(c) / 1000) / 100;  // Rupees → Lakhs (2dp)
           }
         } else {
           for (const c of segmentedConsolidatedCustomers) {
@@ -885,8 +893,8 @@ export function useAppData(filters: Filters = {}): AppData {
       if (month === asOfMonth) {
         // As-of month: use customers.json data directly → exact KPI match
         for (const c of segmentedConsolidatedCustomers) {
-          if (c.outstanding <= 0) continue;
-          bucket[c.risk] += Math.round(c.outstanding / 1000) / 100;  // Rupees → Lakhs (2dp)
+          // NET: credit balances (outstanding < 0) subtract here too — see receivables.ts
+          bucket[c.risk] += Math.round(outstandingContribution(c) / 1000) / 100;  // Rupees → Lakhs (2dp)
         }
       } else {
         for (const [custId, detail] of Object.entries(customerDetail)) {
@@ -922,10 +930,8 @@ export function useAppData(filters: Filters = {}): AppData {
         const bucket: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
         if (month === asOfMonth) {
           // As-of month: use customers.json data directly → exact KPI match
-          for (const c of segmentedConsolidatedCustomers) {
-            if (c.outstanding <= 0) continue;
-            bucket[c.risk]++;
-          }
+          const b = countByRisk(segmentedConsolidatedCustomers);
+          bucket.low = b.low; bucket.medium = b.medium; bucket.high = b.high; bucket.critical = b.critical;
         } else {
           // Historical month — per-type trend data
           for (const c of segmentedConsolidatedCustomers) {
@@ -955,10 +961,8 @@ export function useAppData(filters: Filters = {}): AppData {
       const bucket: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
       if (month === asOfMonth) {
         // As-of month: use customers.json data directly → exact KPI match
-        for (const c of segmentedConsolidatedCustomers) {
-          if (c.outstanding <= 0) continue;
-          bucket[c.risk]++;
-        }
+        const b = countByRisk(segmentedConsolidatedCustomers);
+        bucket.low = b.low; bucket.medium = b.medium; bucket.high = b.high; bucket.critical = b.critical;
       } else {
         for (const c of segmentedConsolidatedCustomers) {
           let monthOutstandingL = 0;
@@ -1051,7 +1055,7 @@ export function useAppData(filters: Filters = {}): AppData {
       creditNotes:     sum((c) => c.creditNotes),
       checkReturns:    sum((c) => c.checkReturns),
       advanceBalance:  sum((c) => c.advanceBalance),
-      outstanding:     sum((c) => c.outstanding),       // formula-based = KPI totalOutstanding
+      outstanding:     sum((c) => outstandingContribution(c)), // = KPI totalOutstanding (NET, see receivables.ts)
       overdue:         sum((c) => c.overdue),
       criticalCount:   allCustomers.filter((c) => c.risk === "critical").length,
       overLimitCount:  allCustomers.filter((c) => c.utilization > 100).length,
