@@ -50,7 +50,7 @@ const fmt = (n: number) => {
   const abs = Math.abs(n);
   if (abs >= 10_000_000) return `${sign}₹${(abs / 10_000_000).toFixed(2)} Cr`;
   if (abs >= 100_000)    return `${sign}₹${(abs / 100_000).toFixed(2)} L`;
-  return `${sign}₹${abs.toLocaleString("en-IN")}`;
+  return `${sign}₹${Math.round(abs).toLocaleString("en-IN")}`;
 };
 
 // Lakhs-denominated values (already divided by 100k)
@@ -333,13 +333,24 @@ export default function CustomerDetail() {
     // Sort chronologically by calendar order (handles cross-FY ranges, e.g.
     // Jan-26/Feb-26/Mar-26 in FY 25-26 followed by Apr-26 in FY 26-27).
     const calMonth = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    return [...byMonth.values()].sort((a, b) => {
+    const sorted = [...byMonth.values()].sort((a, b) => {
       const [am, ay] = [a.month.slice(0, 3), a.month.slice(4)];
       const [bm, by_] = [b.month.slice(0, 3), b.month.slice(4)];
       if (ay !== by_) return Number(ay) - Number(by_);
       return calMonth.indexOf(am) - calMonth.indexOf(bm);
     });
-  }, [activeEntities, customerDetail]);
+    // Pin the as-of (latest) month's overdue + outstanding to the headline KPI
+    // values so the chart endpoint matches the tiles. The Tally bill-wise override
+    // adjusts the headline total but not the calculated monthly series; only the
+    // as-of month has a true reference (there is no Tally history for prior
+    // months, so those stay as the calculated series). Trend unit is lakhs.
+    if (customer && sorted.length) {
+      const last = sorted[sorted.length - 1];
+      last.overdue     = customer.overdue / 100_000;
+      last.outstanding = customer.outstanding / 100_000;
+    }
+    return sorted;
+  }, [activeEntities, customerDetail, customer]);
 
   const invoiceAgingKey = (overdueDays: number): string | null => {
     if (overdueDays <= 0)   return null;
@@ -674,7 +685,7 @@ export default function CustomerDetail() {
       active: isKpiActive("sales", "overdue"),
     },
     { label: "Credit Limit",   value: fmt(customer.creditLimit) },
-    { label: "Utilization",    value: `${utilization}%`,           destructive: utilization > 100 },
+    { label: "Utilization",    value: customer.blocked ? "—" : `${utilization}%`,  destructive: !customer.blocked && utilization > 100 },
     { label: "Credit Period",  value: `${customer.creditPeriod} days` },
     {
       label: "Opening Balance",

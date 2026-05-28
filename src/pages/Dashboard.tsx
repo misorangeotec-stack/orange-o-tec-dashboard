@@ -33,7 +33,7 @@ const fmt = (n: number) => {
   const abs  = Math.abs(n);
   if (abs >= 10_000_000) return `${sign}₹${(abs / 10_000_000).toFixed(2)} Cr`;
   if (abs >= 100_000)    return `${sign}₹${(abs / 100_000).toFixed(2)} L`;
-  return `${sign}₹${abs.toLocaleString("en-IN")}`;
+  return `${sign}₹${Math.round(abs).toLocaleString("en-IN")}`;
 };
 
 // Formats a value that is already expressed in Lakhs

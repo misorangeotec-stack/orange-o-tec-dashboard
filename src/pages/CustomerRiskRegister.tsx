@@ -94,7 +94,7 @@ const fmt = (n: number) => {
   const abs = Math.abs(n);
   if (abs >= 10000000) return `${sign}₹${(abs / 10000000).toFixed(2)} Cr`;
   if (abs >= 100000) return `${sign}₹${(abs / 100000).toFixed(2)} L`;
-  return `${sign}₹${abs.toLocaleString("en-IN")}`;
+  return `${sign}₹${Math.round(abs).toLocaleString("en-IN")}`;
 };
 
 const riskStyle: Record<RiskCategory, string> = {
@@ -668,6 +668,14 @@ export default function CustomerRiskRegister() {
 
   const rows = useMemo(() => {
     let d = [...allData];
+    // Active aging bucket (if any) — drives both the bucket filter below and the
+    // overdue sort, so the Overdue column sorts by the SAME value it displays.
+    const bkMap: Record<string, keyof AgingBuckets> = {
+      "0-30": "0_30", "31-60": "31_60", "61-90": "61_90",
+      "91-120": "91_120", "121-180": "121_180", "180+": "180_plus",
+    };
+    const bucketKey: keyof AgingBuckets | null =
+      agingFilter !== "all" ? (bkMap[agingFilter] ?? null) : null;
     if (search) {
       const q = search.toLowerCase();
       // In group mode, also match by underlying Tally child name.
@@ -680,13 +688,8 @@ export default function CustomerRiskRegister() {
     if (riskLevels.length > 0) {
       d = d.filter((r) => riskLevels.includes(r.risk));
     }
-    if (agingFilter !== "all") {
-      const bkMap: Record<string, keyof AgingBuckets> = {
-        "0-30": "0_30", "31-60": "31_60", "61-90": "61_90",
-        "91-120": "91_120", "121-180": "121_180", "180+": "180_plus",
-      };
-      const bk = bkMap[agingFilter];
-      if (bk) d = d.filter((r) => (r.agingBuckets?.[bk] ?? 0) > 0);
+    if (bucketKey) {
+      d = d.filter((r) => (r.agingBuckets?.[bucketKey] ?? 0) > 0);
     }
     if (specialFilter === "over_credit_limit") {
       d = d.filter((r) => r.utilization > 100);
@@ -712,9 +715,13 @@ export default function CustomerRiskRegister() {
       });
     }
     if (sortKey && sortDir) {
+      // For the Overdue column, sort by the value actually shown: the selected
+      // aging bucket's amount when a bucket filter is active, else total overdue.
+      const valueFor = (r: CustomerRow) =>
+        sortKey === "overdue" && bucketKey ? (r.agingBuckets?.[bucketKey] ?? 0) : r[sortKey];
       d.sort((a, b) => {
-        const av = a[sortKey];
-        const bv = b[sortKey];
+        const av = valueFor(a);
+        const bv = valueFor(b);
         if (typeof av === "number" && typeof bv === "number") return sortDir === "asc" ? av - bv : bv - av;
         return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
       });
@@ -866,6 +873,10 @@ export default function CustomerRiskRegister() {
           r.push(row.blocked ? "Blocked" : "");
         } else if (c.key === "overdue") {
           r.push(overdueForRow(row));
+        } else if (c.key === "utilization") {
+          // Blocked customers carry a ₹1 sentinel credit limit, not a real limit,
+          // so their utilization % is meaningless — export a dash instead.
+          r.push(row.blocked ? "—" : row.utilization);
         } else {
           const v = row[c.key];
           r.push(typeof v === "number" ? v : (v ?? "") as string);
@@ -1433,8 +1444,8 @@ export default function CustomerRiskRegister() {
                         </TableCell>
                       )}
                       {visibleCols.has("utilization") && (
-                        <TableCell className={`text-sm text-right font-mono font-semibold ${r.utilization > 100 ? "text-destructive" : r.utilization > 80 ? "text-primary" : ""}`}>
-                          {r.utilization}%
+                        <TableCell className={`text-sm text-right font-mono font-semibold ${r.blocked ? "text-muted-foreground" : r.utilization > 100 ? "text-destructive" : r.utilization > 80 ? "text-primary" : ""}`}>
+                          {r.blocked ? "—" : `${r.utilization}%`}
                         </TableCell>
                       )}
                       {visibleCols.has("risk") && (

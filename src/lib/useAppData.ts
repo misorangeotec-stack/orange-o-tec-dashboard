@@ -453,6 +453,15 @@ export function useAppData(filters: Filters = {}): AppData {
           (t) => (c.salesByType?.[t] ?? 0) > 0 || (c.outstandingByType?.[t] ?? 0) > 0
         );
         if (hasInTypeActivity) return true;
+        // A customer with no sales mix has ALL of its untyped residual (opening
+        // balance, on-account/advance receipts, unlinked credit notes, cheque
+        // returns, Tally override delta) assigned to "other" by the projection
+        // below (selectedShare = 1 when "other" is selected). Keep such customers
+        // whenever "other" is in the selection, otherwise their residual
+        // outstanding/overdue shows up in the unfiltered "all" view but vanishes
+        // from every specific-type subset, so subsets fail to reconcile to the total.
+        const salesTotal = allSaleTypes.reduce((s, t) => s + (c.salesByType?.[t] ?? 0), 0);
+        if (salesTotal <= 1e-9 && saleTypeList.includes("other" as SaleType)) return true;
         // Keep no-activity customers (sales/receipts/credit notes all 0) so the
         // "No Activity" segment filter downstream can still find them. Without
         // this, every no-activity customer is dropped here and the segment
@@ -466,13 +475,6 @@ export function useAppData(filters: Filters = {}): AppData {
             .reduce((m, inv) => Math.max(m, inv.overdueDays), 0);
           return Math.max(best, odFromType);
         }, 0);
-        // Project agingBuckets to only the selected sale types (invoice-level; opening balance excluded)
-        const projectedAgingBuckets = (Object.keys(c.agingBuckets) as (keyof AgingBuckets)[])
-          .reduce((acc, k) => {
-            acc[k] = saleTypeList.reduce((s, t) => s + (c.agingBucketsByType?.[t]?.[k] ?? 0), 0);
-            return acc;
-          }, {} as AgingBuckets);
-
         // Amounts with no sale type (opening balance, on-account/advance receipts,
         // unlinked credit notes, cheque returns, Tally override delta) are split
         // across the selected types by the customer's sales mix, so the per-type
@@ -493,6 +495,20 @@ export function useAppData(filters: Filters = {}): AppData {
           const residual = total - allSaleTypes.reduce((s, t) => s + (byType?.[t] ?? 0), 0);
           return typedSum + residual * selectedShare;
         };
+
+        // Same residual allocation per aging bucket: the flat agingBuckets include
+        // opening balance (180+) which carries no sale type, so distribute that
+        // gap by sales mix → buckets reconcile to the flat total under any subset.
+        const projectedAgingBuckets = (Object.keys(c.agingBuckets) as (keyof AgingBuckets)[])
+          .reduce((acc, k) => {
+            acc[k] = project(
+              c.agingBuckets[k] ?? 0,
+              Object.fromEntries(
+                allSaleTypes.map((t) => [t, c.agingBucketsByType?.[t]?.[k] ?? 0]),
+              ) as Partial<Record<SaleType, number>>,
+            );
+            return acc;
+          }, {} as AgingBuckets);
 
         return {
           ...c,
