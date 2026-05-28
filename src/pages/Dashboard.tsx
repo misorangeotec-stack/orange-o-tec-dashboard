@@ -65,7 +65,6 @@ export default function Dashboard() {
   const [salesPersons,    setSalesPersons]    = useState<string[]>([]);
   const [saleTypes,       setSaleTypes]       = useState<string[]>([]);
   const [showBuildup,     setShowBuildup]     = useState(false);
-  const [showRecon,       setShowRecon]       = useState(false);
   const [viewMode,        setViewMode]        = useState<ViewMode>(
     searchParams.get("view") === "group" ? "group" : "customer",
   );
@@ -386,110 +385,6 @@ export default function Dashboard() {
           );
         })}
       </div>
-
-      {/* Receivables Reconciliation — collapsible, closed by default */}
-      {kpis && (() => {
-        const totalDN = kpis.totalDebitNotes ?? 0;
-        const totalJN = kpis.totalJournalAdjustments ?? 0;
-        // kpis.totalReceipts here is GROSS (sum of c.receipts); cheque returns must be added back.
-        const computed = kpis.totalOpeningBalance + kpis.totalSales
-          - kpis.totalReceipts + kpis.totalCheckReturns
-          - kpis.totalCreditNotes
-          + totalDN + totalJN
-          + kpis.totalAdvanceBalance;
-        const diff = Math.abs(computed - kpis.totalOutstanding);
-        const balanced = diff < 1;
-
-        const rows: {
-          label: string; value: number; display?: string; sign: "+" | "−"; color: string;
-          subRows?: { label: string; value: number; color: string }[];
-        }[] = [
-          { label: "Opening Balance (Apr-25)",    value: kpis.totalOpeningBalance,    sign: "+", color: "text-amber-700"    },
-          { label: "Sales",                       value: kpis.totalSales,             sign: "+", color: "text-foreground"   },
-          { label: "Receipts (Gross)",            value: kpis.totalReceipts,          sign: "−", color: "text-emerald-700"  },
-          { label: "Cheque Returns",              value: kpis.totalCheckReturns,      sign: "+", color: "text-destructive"  },
-          { label: "Credit Notes",                value: kpis.totalCreditNotes,       sign: "−", color: "text-blue-700"     },
-          { label: "Debit Notes",                 value: totalDN,                     sign: "+", color: "text-orange-700"   },
-          { label: "Journal Adj (Net)",           value: Math.abs(totalJN), display: fmtINRDrCr(totalJN), sign: totalJN >= 0 ? "+" : "−", color: "text-indigo-700" },
-          {
-            label: "Advance Balance",
-            value: kpis.totalAdvanceBalance,
-            sign: "+",
-            color: "text-purple-700",
-            subRows: kpis.totalAdvanceBalance > 0 ? [
-              { label: "↳ On Account / Advance", value: kpis.totalAdvanceBySource.onAccount,     color: "text-purple-500" },
-              { label: "↳ Agst Ref excess",      value: kpis.totalAdvanceBySource.agstRefExcess, color: "text-purple-400" },
-              { label: "↳ Unlinked Credit Notes",value: kpis.totalAdvanceBySource.creditNotes,   color: "text-purple-300" },
-            ] : undefined,
-          },
-        ];
-
-        return (
-          <Card className="rounded-card">
-            <button
-              className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-muted/30 transition-colors rounded-card"
-              onClick={() => setShowRecon((v) => !v)}
-            >
-              <div className="flex items-center gap-2">
-                {showRecon
-                  ? <ChevronUp   className="h-3.5 w-3.5 text-muted-foreground" />
-                  : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Receivables Reconciliation
-                </span>
-              </div>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${balanced ? "bg-emerald-100 text-emerald-700" : "bg-destructive/10 text-destructive"}`}>
-                {balanced ? "✓ Balanced" : `✗ Differs by ${fmt(diff)}`}
-              </span>
-            </button>
-
-            {showRecon && (
-              <CardContent className="px-4 pb-4 pt-0">
-                <div className="border-t border-border pt-3">
-                  <div className="flex flex-wrap gap-1.5 items-center">
-                    {rows.map((r, i) => (
-                      <div key={r.label} className="flex items-center gap-1.5">
-                        {i > 0 && (
-                          <span className={`text-sm font-bold ${r.sign === "+" ? "text-emerald-600" : "text-destructive"}`}>
-                            {r.sign}
-                          </span>
-                        )}
-                        <div className="flex flex-col">
-                          <div className="flex flex-col bg-muted/40 rounded px-2.5 py-1.5 min-w-[90px]">
-                            <span className="text-[10px] text-muted-foreground leading-tight">{r.label}</span>
-                            <span className={`text-xs font-bold mt-0.5 ${r.color}`}>{r.display ?? fmtINRMoney(r.value)}</span>
-                          </div>
-                          {r.subRows && (
-                            <div className="flex flex-col gap-0.5 mt-1">
-                              {r.subRows.map((sr) => (
-                                <div key={sr.label} className="flex items-center justify-between gap-2 bg-muted/20 rounded px-2 py-1 min-w-[90px]">
-                                  <span className="text-[9px] text-muted-foreground leading-tight">{sr.label}</span>
-                                  <span className={`text-[10px] font-semibold ${sr.color}`}>{fmtINRMoney(sr.value)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    <span className="text-sm font-bold text-muted-foreground">=</span>
-                    <div className="flex flex-col bg-destructive/10 border border-destructive/20 rounded px-2.5 py-1.5 min-w-[110px]">
-                      <span className="text-[10px] text-muted-foreground leading-tight">Outstanding (computed)</span>
-                      <span className="text-xs font-bold mt-0.5 text-destructive">{fmt(computed)}</span>
-                    </div>
-                    {!balanced && (
-                      <div className="flex flex-col bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5 min-w-[110px]">
-                        <span className="text-[10px] text-amber-700 leading-tight">Outstanding (KPI card)</span>
-                        <span className="text-xs font-bold mt-0.5 text-amber-800">{fmt(kpis.totalOutstanding)}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            )}
-          </Card>
-        );
-      })()}
 
       {/* Outstanding Build-up — shown on demand */}
       {showBuildup && kpis && (() => {

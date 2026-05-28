@@ -737,6 +737,12 @@ export default function CustomerRiskRegister() {
     return agingFilter !== "all" ? (map[agingFilter] ?? null) : null;
   }, [agingFilter]);
 
+  // Overdue shown per row: the selected bucket's amount when an aging filter is
+  // active, else the customer's total overdue. Keeps the column consistent with
+  // the bucket-aware KPI total and the customer-detail aging breakdown.
+  const overdueForRow = (r: CustomerRow) =>
+    agingBucketKey ? (r.agingBuckets?.[agingBucketKey] ?? 0) : r.overdue;
+
   const totals = useMemo(() => ({
     sales:             rows.reduce((s, r) => s + r.sales, 0),
     receipts:          rows.reduce((s, r) => s + r.receipts, 0),
@@ -846,7 +852,8 @@ export default function CustomerRiskRegister() {
       utilization: PCT_FMT,
     };
 
-    const header = visibleCols_.map((c) => c.label);
+    const header = visibleCols_.map((c) =>
+      c.key === "overdue" && agingBucketKey ? `Overdue (${agingFilter})` : c.label);
     const aoa: (string | number)[][] = [header];
     for (const row of rows) {
       const r: (string | number)[] = [];
@@ -857,6 +864,8 @@ export default function CustomerRiskRegister() {
           r.push(row.risk.charAt(0).toUpperCase() + row.risk.slice(1));
         } else if (c.key === "blocked") {
           r.push(row.blocked ? "Blocked" : "");
+        } else if (c.key === "overdue") {
+          r.push(overdueForRow(row));
         } else {
           const v = row[c.key];
           r.push(typeof v === "number" ? v : (v ?? "") as string);
@@ -1097,6 +1106,11 @@ export default function CustomerRiskRegister() {
               <SaleTypeMultiSelect value={saleTypes} onChange={setSaleTypes} />
             </div>
           </div>
+          {saleTypes.length > 0 && (
+            <p className="text-[11px] text-muted-foreground italic mt-2">
+              Opening balance, on-account/advance receipts, unlinked credit notes and cheque returns have no sale type — they're distributed across types by each customer's sales mix (estimate), so figures still reconcile to the total.
+            </p>
+          )}
           <FilterChips chips={filterChips} onClearAll={clearFilters} />
         </CardContent>
       </Card>
@@ -1278,7 +1292,7 @@ export default function CustomerRiskRegister() {
                     onClick={() => toggleSort(col.key)}
                   >
                     <span className="inline-flex items-center gap-1">
-                      {col.label}
+                      {col.key === "overdue" && agingBucketKey ? `Overdue (${agingFilter})` : col.label}
                       {sortKey === col.key && sortDir === "asc"  && <ArrowUp   className="h-3 w-3" />}
                       {sortKey === col.key && sortDir === "desc" && <ArrowDown  className="h-3 w-3" />}
                       {sortKey !== col.key && <ArrowUpDown className="h-3 w-3 opacity-30" />}
@@ -1357,8 +1371,8 @@ export default function CustomerRiskRegister() {
                         </TableCell>
                       )}
                       {visibleCols.has("overdue") && (
-                        <TableCell className={`text-sm text-right font-mono ${r.overdue > 0 ? "text-destructive font-semibold" : ""}`}>
-                          {fmt(r.overdue)}
+                        <TableCell className={`text-sm text-right font-mono ${overdueForRow(r) > 0 ? "text-destructive font-semibold" : ""}`}>
+                          {fmt(overdueForRow(r))}
                         </TableCell>
                       )}
                       {visibleCols.has("maxOverdueDays") && (

@@ -435,6 +435,15 @@ export function useAppData(filters: Filters = {}): AppData {
     return list;
   }, [filters.saleType]);
 
+  // Every sale-type key present in the data (ink, spare_parts, machine, head, other),
+  // derived rather than hard-coded so it stays in sync with the pipeline.
+  const allSaleTypes = useMemo<SaleType[]>(() => {
+    const s = new Set<string>();
+    for (const c of customers)
+      for (const k of Object.keys(c.salesByType ?? {})) s.add(k);
+    return [...s] as SaleType[];
+  }, [customers]);
+
   // ── Project customer values for active sale type filter ─────────────────────
   const projectedCustomers = useMemo(() => {
     if (!saleTypeList.length) return customers;
@@ -464,16 +473,39 @@ export function useAppData(filters: Filters = {}): AppData {
             return acc;
           }, {} as AgingBuckets);
 
+        // Amounts with no sale type (opening balance, on-account/advance receipts,
+        // unlinked credit notes, cheque returns, Tally override delta) are split
+        // across the selected types by the customer's sales mix, so the per-type
+        // figures reconcile back to the customer total. Customers with no in-period
+        // sales have no mix → their residual lands in "other". This makes the
+        // opening-balance share an ESTIMATE, not source-true; sales drives the split.
+        const salesTotal = allSaleTypes.reduce((s, t) => s + (c.salesByType?.[t] ?? 0), 0);
+        const hasSales = salesTotal > 1e-9;
+        const selectedShare = hasSales
+          ? saleTypeList.reduce((s, t) => s + (c.salesByType?.[t] ?? 0), 0) / salesTotal
+          : (saleTypeList.includes("other" as SaleType) ? 1 : 0);
+
+        const project = (
+          total: number,
+          byType: Partial<Record<SaleType, number>> | undefined,
+        ): number => {
+          const typedSum = saleTypeList.reduce((s, t) => s + (byType?.[t] ?? 0), 0);
+          const residual = total - allSaleTypes.reduce((s, t) => s + (byType?.[t] ?? 0), 0);
+          return typedSum + residual * selectedShare;
+        };
+
         return {
           ...c,
-          sales:          saleTypeList.reduce((s, t) => s + (c.salesByType?.[t]       ?? 0), 0),
-          outstanding:    saleTypeList.reduce((s, t) => s + (c.outstandingByType?.[t] ?? 0), 0),
-          overdue:        saleTypeList.reduce((s, t) => s + (c.overdueByType?.[t]     ?? 0), 0),
+          sales:          saleTypeList.reduce((s, t) => s + (c.salesByType?.[t] ?? 0), 0),
+          receipts:       project(c.receipts,     c.receiptsByType),
+          creditNotes:    project(c.creditNotes,  c.creditNotesByType),
+          outstanding:    project(c.outstanding,  c.outstandingByType),
+          overdue:        project(c.overdue,      c.overdueByType),
           maxOverdueDays: typeMaxOD,
           agingBuckets:   projectedAgingBuckets,
         };
       });
-  }, [customers, saleTypeList, customerDetail]);
+  }, [customers, saleTypeList, customerDetail, allSaleTypes]);
 
   // ── Consolidated customers after company/location/risk/saleType filters ──────
   const projectedConsolidatedCustomers = useMemo(
