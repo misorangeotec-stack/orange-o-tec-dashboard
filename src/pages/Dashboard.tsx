@@ -470,25 +470,36 @@ export default function Dashboard() {
               const latest = riskTrend[riskTrend.length - 1];
               if (!latest) return null;
               const tiers = [
-                { label: "Low",      value: latest.low,      bg: "bg-emerald-50",  border: "border-emerald-200",  text: "text-emerald-700",  bold: "text-emerald-800" },
-                { label: "Medium",   value: latest.medium,   bg: "bg-amber-50",    border: "border-amber-200",    text: "text-amber-700",    bold: "text-amber-800"   },
-                { label: "High",     value: latest.high,     bg: "bg-orange-50",   border: "border-orange-200",   text: "text-orange-700",   bold: "text-orange-800"  },
-                { label: "Critical", value: latest.critical, bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", bold: "text-destructive" },
+                { label: "Low",      risk: "low",      value: latest.low,      bg: "bg-emerald-50",  border: "border-emerald-200",  text: "text-emerald-700",  bold: "text-emerald-800" },
+                { label: "Medium",   risk: "medium",   value: latest.medium,   bg: "bg-amber-50",    border: "border-amber-200",    text: "text-amber-700",    bold: "text-amber-800"   },
+                { label: "High",     risk: "high",     value: latest.high,     bg: "bg-orange-50",   border: "border-orange-200",   text: "text-orange-700",   bold: "text-orange-800"  },
+                { label: "Critical", risk: "critical", value: latest.critical, bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", bold: "text-destructive" },
               ];
               const total = tiers.reduce((s, t) => s + t.value, 0);
               return (
                 <div className="mt-3 pt-3 border-t border-border">
                   <div className="flex flex-wrap items-stretch gap-1.5">
                     {tiers.map((t) => (
-                      <div key={t.label} className={`flex flex-col items-center ${t.bg} border ${t.border} rounded px-2.5 py-1.5 min-w-[80px] flex-1`}>
+                      <button
+                        key={t.label}
+                        type="button"
+                        onClick={() => navigate(buildRRUrl(`/dashboard/risk-register?risk=${t.risk}`))}
+                        title={`View ${t.label}-risk customers in the Risk Register`}
+                        className={`flex flex-col items-center ${t.bg} border ${t.border} rounded px-2.5 py-1.5 min-w-[80px] flex-1 cursor-pointer transition hover:shadow-md hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-ring`}
+                      >
                         <span className={`text-[10px] font-semibold uppercase tracking-wide ${t.text}`}>{t.label}</span>
                         <span className={`text-xs font-bold mt-0.5 ${t.bold}`}>{fmtL(t.value)}</span>
-                      </div>
+                      </button>
                     ))}
-                    <div className="flex flex-col items-center bg-muted/50 border border-border rounded px-2.5 py-1.5 min-w-[96px] flex-1">
+                    <button
+                      type="button"
+                      onClick={() => navigate(buildRRUrl("/dashboard/risk-register"))}
+                      title="View all customers in the Risk Register"
+                      className="flex flex-col items-center bg-muted/50 border border-border rounded px-2.5 py-1.5 min-w-[96px] flex-1 cursor-pointer transition hover:shadow-md hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
                       <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide">Total Outstanding</span>
                       <span className="text-xs font-bold text-foreground mt-0.5">{fmtL(total)}</span>
-                    </div>
+                    </button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1.5">{latest.month} (latest month)</p>
                 </div>
@@ -522,25 +533,36 @@ export default function Dashboard() {
               const latest = riskCountTrend[riskCountTrend.length - 1];
               if (!latest) return null;
               const tiers = [
-                { label: "Low",      value: latest.low,      bg: "bg-emerald-50",     border: "border-emerald-200",  text: "text-emerald-700",  bold: "text-emerald-800" },
-                { label: "Medium",   value: latest.medium,   bg: "bg-amber-50",       border: "border-amber-200",    text: "text-amber-700",    bold: "text-amber-800"   },
-                { label: "High",     value: latest.high,     bg: "bg-orange-50",      border: "border-orange-200",   text: "text-orange-700",   bold: "text-orange-800"  },
-                { label: "Critical", value: latest.critical, bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", bold: "text-destructive" },
+                { label: "Low",      risk: "low",      value: latest.low,      bg: "bg-emerald-50",     border: "border-emerald-200",  text: "text-emerald-700",  bold: "text-emerald-800" },
+                { label: "Medium",   risk: "medium",   value: latest.medium,   bg: "bg-amber-50",       border: "border-amber-200",    text: "text-amber-700",    bold: "text-amber-800"   },
+                { label: "High",     risk: "high",     value: latest.high,     bg: "bg-orange-50",      border: "border-orange-200",   text: "text-orange-700",   bold: "text-orange-800"  },
+                { label: "Critical", risk: "critical", value: latest.critical, bg: "bg-destructive/10", border: "border-destructive/20", text: "text-destructive", bold: "text-destructive" },
               ];
               const total = tiers.reduce((s, t) => s + t.value, 0);
               return (
                 <div className="mt-3 pt-3 border-t border-border">
                   <div className="flex flex-wrap items-stretch gap-1.5">
                     {tiers.map((t) => (
-                      <div key={t.label} className={`flex flex-col items-center ${t.bg} border ${t.border} rounded px-2.5 py-1.5 min-w-[80px] flex-1`}>
+                      <button
+                        key={t.label}
+                        type="button"
+                        onClick={() => navigate(buildRRUrl(`/dashboard/risk-register?risk=${t.risk}`))}
+                        title={`View ${t.label}-risk customers in the Risk Register`}
+                        className={`flex flex-col items-center ${t.bg} border ${t.border} rounded px-2.5 py-1.5 min-w-[80px] flex-1 cursor-pointer transition hover:shadow-md hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-ring`}
+                      >
                         <span className={`text-[10px] font-semibold uppercase tracking-wide ${t.text}`}>{t.label}</span>
                         <span className={`text-xs font-bold mt-0.5 ${t.bold}`}>{t.value}</span>
-                      </div>
+                      </button>
                     ))}
-                    <div className="flex flex-col items-center bg-muted/50 border border-border rounded px-2.5 py-1.5 min-w-[96px] flex-1">
+                    <button
+                      type="button"
+                      onClick={() => navigate(buildRRUrl("/dashboard/risk-register"))}
+                      title="View all customers in the Risk Register"
+                      className="flex flex-col items-center bg-muted/50 border border-border rounded px-2.5 py-1.5 min-w-[96px] flex-1 cursor-pointer transition hover:shadow-md hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
                       <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide">Total Customers</span>
                       <span className="text-xs font-bold text-foreground mt-0.5">{total}</span>
-                    </div>
+                    </button>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1.5">{latest.month} (latest month)</p>
                 </div>
