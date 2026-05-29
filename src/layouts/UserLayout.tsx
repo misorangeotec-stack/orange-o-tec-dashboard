@@ -10,6 +10,14 @@ import type { EximSummary } from "@/lib/eximTypes";
 import { FYMultiSelect } from "@/components/FYMultiSelect";
 import { useFY } from "@/lib/fyContext";
 
+/** Format an ISO date ("2026-05-28") as "28 May 2026" without timezone drift. */
+function formatAsOf(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${parseInt(m[3], 10)} ${months[parseInt(m[2], 10) - 1]} ${m[1]}`;
+}
+
 function resolvePageContext(pathname: string): ChatPageContext {
   const customerMatch = /\/dashboard\/customer\/([^/]+)/.exec(pathname);
   if (customerMatch) {
@@ -56,7 +64,13 @@ export default function UserLayout() {
             <SidebarTrigger className="text-foreground" />
             <span className="text-sm font-semibold text-foreground">Dashboard</span>
             <span className="text-xs text-muted-foreground hidden sm:inline">· {fyLabel}</span>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-3">
+              {dashboard?.asOfDate && (
+                <span className="text-xs text-muted-foreground hidden md:inline whitespace-nowrap">
+                  Data updated as of{" "}
+                  <span className="font-medium text-foreground">{formatAsOf(dashboard.asOfDate)}</span>
+                </span>
+              )}
               <FYMultiSelect />
             </div>
           </header>
