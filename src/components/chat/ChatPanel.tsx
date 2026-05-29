@@ -7,6 +7,7 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatSuggestions } from "./ChatSuggestions";
 import { buildChatContext } from "@/lib/buildChatContext";
 import { buildSystemPrompt } from "@/lib/buildSystemPrompt";
+import { CHAT_TOOLS, makeToolExecutor } from "@/lib/chatTools";
 import { useChatStream } from "@/hooks/useChatStream";
 import type { ChatMessage as ChatMessageType, ChatPageContext } from "@/lib/chatTypes";
 import type { Customer, DashboardData, CustomerDetail, KPIs } from "@/lib/types";
@@ -130,7 +131,20 @@ export function ChatPanel({
       content: m.content,
     }));
 
-    await sendMessage(history, systemPrompt);
+    // Receivables pages get data tools; EXIM stays on the JSON-blob path.
+    const useTools = pageCtx.page !== "exim";
+    const sendOpts = useTools
+      ? {
+          tools: CHAT_TOOLS,
+          executor: makeToolExecutor({
+            allCustomers,
+            customerDetail,
+            asOfDate: dashboard?.asOfDate ?? "2026-03-25",
+          }),
+        }
+      : undefined;
+
+    await sendMessage(history, systemPrompt, sendOpts);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

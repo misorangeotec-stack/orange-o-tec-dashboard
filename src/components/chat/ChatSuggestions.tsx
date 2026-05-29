@@ -2,15 +2,15 @@ import type { PageContext, ChatPageContext } from "@/lib/chatTypes";
 
 const SUGGESTIONS: Record<PageContext, string[]> = {
   dashboard: [
+    "How much collection received from customers of Karan in the last 27 days?",
     "What is our total overdue and how does it compare to outstanding?",
-    "Which risk category has the most customers?",
+    "Show me outstanding broken down by salesperson.",
     "Show me the top 5 customers by overdue amount.",
-    "How much is sitting in the 180+ days aging bucket?",
   ],
   "risk-register": [
     "List all critical customers and their outstanding amounts.",
     "Which customers are over their credit limit?",
-    "Who has the highest overdue days and by how much?",
+    "Which salesperson has the highest overdue?",
     "Compare O-tec vs Enterprise outstanding totals.",
   ],
   "customer-detail": [

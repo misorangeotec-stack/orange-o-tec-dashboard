@@ -1,6 +1,18 @@
 import { useRef, useState } from "react";
 import Anthropic from "@anthropic-ai/sdk";
 
+const MODEL = "claude-haiku-4-5-20251001";
+const MAX_TOKENS = 2048;
+const MAX_TOOL_TURNS = 5;
+
+type ToolExecutor = (name: string, input: Record<string, unknown>) => string;
+
+interface SendOptions {
+  tools?: Anthropic.Tool[];
+  executor?: ToolExecutor;
+  onToolStart?: (name: string) => void;
+}
+
 interface UseChatStreamOptions {
   onChunk: (chunk: string) => void;
   onComplete: () => void;
@@ -10,7 +22,8 @@ interface UseChatStreamOptions {
 export interface UseChatStreamReturn {
   sendMessage: (
     messages: { role: "user" | "assistant"; content: string }[],
-    systemPrompt: string
+    systemPrompt: string,
+    opts?: SendOptions
   ) => Promise<void>;
   isStreaming: boolean;
   abort: () => void;
@@ -19,7 +32,7 @@ export interface UseChatStreamReturn {
 export function useChatStream(options: UseChatStreamOptions): UseChatStreamReturn {
   const [isStreaming, setIsStreaming] = useState(false);
   const clientRef = useRef<Anthropic | null>(null);
-  // Store the stream's controller so we can abort it
+  // Store the current iteration's abort fn so the Stop button can cancel it.
   const abortRef = useRef<(() => void) | null>(null);
 
   if (!clientRef.current) {
@@ -39,43 +52,77 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
   const sendMessage = async (
     messages: { role: "user" | "assistant"; content: string }[],
-    systemPrompt: string
+    systemPrompt: string,
+    opts?: SendOptions
   ) => {
-    if (!clientRef.current) return;
+    const client = clientRef.current;
+    if (!client) return;
 
     setIsStreaming(true);
     let aborted = false;
 
+    // Internal conversation can hold structured content blocks (tool_use /
+    // tool_result), separate from the plain-string messages the UI renders.
+    const convo: Anthropic.MessageParam[] = messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
     try {
-      const stream = clientRef.current.messages.stream({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages,
-      });
+      for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+        const stream = client.messages.stream({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: systemPrompt,
+          messages: convo,
+          ...(opts?.tools ? { tools: opts.tools } : {}),
+        });
 
-      // Allow aborting by calling stream's controller
-      abortRef.current = () => {
-        aborted = true;
-        stream.abort();
-      };
+        // Re-point abort to THIS iteration's stream each pass.
+        abortRef.current = () => {
+          aborted = true;
+          stream.abort();
+        };
 
-      stream.on("text", (text: string) => {
-        if (!aborted) {
-          options.onChunk(text);
+        stream.on("text", (text: string) => {
+          if (!aborted) options.onChunk(text);
+        });
+
+        const final = await stream.finalMessage();
+        if (aborted) return;
+
+        // No tool calls → this is the final answer.
+        if (final.stop_reason !== "tool_use" || !opts?.executor) {
+          options.onComplete();
+          return;
         }
-      });
 
-      await stream.finalMessage();
+        // Record the assistant turn (with its tool_use blocks), then run each tool
+        // locally and feed the results back for the next turn.
+        convo.push({ role: "assistant", content: final.content });
 
-      if (!aborted) {
-        options.onComplete();
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        for (const block of final.content) {
+          if (block.type !== "tool_use") continue;
+          opts.onToolStart?.(block.name);
+          const out = opts.executor(block.name, (block.input ?? {}) as Record<string, unknown>);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: block.id,
+            content: out,
+          });
+        }
+
+        convo.push({ role: "user", content: toolResults });
+        // loop continues → model sees tool results and produces its answer
       }
+
+      // Exhausted the tool-turn budget without a final text answer.
+      if (!aborted) options.onComplete();
     } catch (err) {
       if (!aborted) {
         const message =
           err instanceof Error ? err.message : "An error occurred. Please try again.";
-        // Provide a helpful message for missing API key
         if (message.includes("401") || message.includes("API key")) {
           options.onError(
             "Invalid API key. Please set VITE_ANTHROPIC_API_KEY in your .env.local file."

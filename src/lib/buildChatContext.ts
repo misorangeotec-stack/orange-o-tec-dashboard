@@ -11,27 +11,12 @@ import type {
 import type { ChatPageContext } from "./chatTypes";
 import type { EximSummary } from "./eximTypes";
 
-// Summarized customer shape — strips large breakdown fields to keep token count low
-interface CustomerSummary {
-  id: string;
-  name: string;
-  company: string;
-  location: string;
-  risk: string;
-  outstanding: number;
-  overdue: number;
-  maxOverdueDays: number;
-  utilization: number;
-  creditLimit: number;
-}
-
 export interface SlicedContext {
   asOfDate: string;
   kpis: KPIs | null;
   aging: AgingPoint[];
   riskSegmentation: RiskSegment[];
   topRiskyCustomers?: TopRiskyCustomer[];
-  customers?: CustomerSummary[];
   currentCustomer?: Customer;
   currentCustomerInvoices?: object[];
   currentCustomerTrend?: object[];
@@ -44,21 +29,9 @@ export interface SlicedContext {
   note?: string;
 }
 
-function summarize(c: Customer): CustomerSummary {
-  return {
-    id: c.id,
-    name: c.name,
-    company: c.company,
-    location: c.location,
-    risk: c.risk,
-    outstanding: c.outstanding,
-    overdue: c.overdue,
-    maxOverdueDays: c.maxOverdueDays,
-    utilization: c.utilization,
-    creditLimit: c.creditLimit,
-  };
-}
-
+// Receivables pages no longer embed a (truncated) customer list — the chat now
+// answers customer/aggregate/period questions through the tools in chatTools.ts,
+// which compute over the FULL dataset. This summary is high-level orientation only.
 export function buildChatContext(
   pageCtx: ChatPageContext,
   allCustomers: Customer[],
@@ -76,21 +49,12 @@ export function buildChatContext(
 
   switch (pageCtx.page) {
     case "dashboard": {
-      // Top 10 risky customers + top 100 summarized customers by outstanding
       base.topRiskyCustomers = dashboard?.topRiskyCustomers ?? [];
-      base.customers = [...allCustomers]
-        .sort((a, b) => b.outstanding - a.outstanding)
-        .slice(0, 100)
-        .map(summarize);
       break;
     }
 
     case "risk-register": {
-      // Top 100 summarized customers sorted by overdue days (most critical first)
-      base.customers = [...allCustomers]
-        .sort((a, b) => b.maxOverdueDays - a.maxOverdueDays)
-        .slice(0, 100)
-        .map(summarize);
+      // Tools cover the full register; no embedded list.
       break;
     }
 
@@ -120,11 +84,6 @@ export function buildChatContext(
 
     case "alerts": {
       base.alerts = (dashboard?.alerts ?? []).slice(0, 50);
-      // Also include top 50 customers by overdue for context
-      base.customers = [...allCustomers]
-        .sort((a, b) => b.overdue - a.overdue)
-        .slice(0, 50)
-        .map(summarize);
       break;
     }
 
@@ -157,14 +116,8 @@ export function buildChatContext(
       break;
     }
 
-    default: {
-      // For other pages, provide summary KPIs + top 50 customers
-      base.customers = [...allCustomers]
-        .sort((a, b) => b.outstanding - a.outstanding)
-        .slice(0, 50)
-        .map(summarize);
+    default:
       break;
-    }
   }
 
   return base;

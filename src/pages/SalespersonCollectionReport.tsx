@@ -1,12 +1,15 @@
-import { useState, useMemo, useEffect, Fragment } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import {
   HandCoins, RefreshCw, AlertTriangle, ChevronRight, ChevronDown,
   ArrowUpDown, ArrowUp, ArrowDown, Wallet, CalendarClock, Coins,
-  TrendingDown, Percent, Download,
+  TrendingDown, Percent, Download, BarChart3, X,
 } from "lucide-react";
+import {
+  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -60,7 +63,7 @@ function formatDateLong(iso: string): string {
 type SortKey = "salesperson" | "outstanding" | "due" | "received" | "pending" | "collectionPct";
 type SortDir = "asc" | "desc";
 
-interface Metrics { outstanding: number; due: number; received: number; pending: number; }
+interface Metrics { outstanding: number; due: number; received: number; pending: number; dueSoon: number; }
 interface CustomerLine { id: string; name: string; company: string; location: string; m: Metrics; }
 interface SPRow { salesperson: string; customers: CustomerLine[]; m: Metrics; }
 
@@ -71,8 +74,15 @@ const spName = (s: string | undefined): string => {
   return t ? t.toUpperCase() : "OTHERS";
 };
 
-const emptyMetrics = (): Metrics => ({ outstanding: 0, due: 0, received: 0, pending: 0 });
+const emptyMetrics = (): Metrics => ({ outstanding: 0, due: 0, received: 0, pending: 0, dueSoon: 0 });
 const collectionPct = (m: Metrics): number | null => (m.due > 0 ? (m.received / m.due) * 100 : null);
+
+/** Outstanding to DISPLAY = the START-of-month balance = month-end balance + that month's
+ *  receipts (the money already collected this month is added back). This is always ≥ Due
+ *  (Due is the portion of that opening balance which had come due), so the report never shows
+ *  Due greater than Outstanding. The `m.due` floor guards credit-heavy groups whose net
+ *  month-end balance is pushed below the due amount by customers sitting in advance. */
+const startMonthOutstanding = (m: Metrics): number => Math.max(m.outstanding + m.received, m.due);
 
 const pctStyle = (pct: number | null): string => {
   if (pct === null) return "";
@@ -100,6 +110,9 @@ export default function SalespersonCollectionReport() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("pending");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  // Month-wise panel: null = consolidated (all filtered salespersons)
+  const [selectedSalesperson, setSelectedSalesperson] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // Default month → as-of month; reset when the FY (and thus month set) changes.
   useEffect(() => {
@@ -135,45 +148,52 @@ export default function SalespersonCollectionReport() {
     return d;
   }, [allCustomers, company, location, salesPersons]);
 
-  // Per-customer metrics for the selected month
-  const customerMetrics = useMemo(() => {
-    const monthEnd = monthLabelToEndDate(selectedMonth);
-    const compute = (c: Customer): Metrics => {
-      const mt = customerDetail[c.id]?.trend.find((t) => t.month === selectedMonth);
-      // Received = PURE receipt vouchers for the month (LAKHS → rupees). Cheque returns,
-      // credit notes and debit notes are deliberately NOT netted here — the pipeline already
-      // folds them into outstanding → invoice pending → trend.overdue, so they show up on the
-      // Due/Overdue side. Netting them into Received too would double-count them in Pending.
-      // (Sourced from the monthly trend so it works in both local-JSON and Supabase modes.)
-      const received = (mt?.receipts ?? 0) * 100_000;
-      let outstanding: number;
-      // openDue = amount on bills due by month-end that is STILL OPEN (i.e. net of every
-      // receipt collected to date, including this month's). This is the true "still to collect".
-      let openDue: number;
-      if (isCurrentMonth) {
-        outstanding = c.outstanding; // as on asOfDate (NET)
-        const invs = customerDetail[c.id]?.invoices ?? [];
-        let dueFromInv = 0;
-        for (const inv of invs) {
-          if (inv.pending > 0 && new Date(inv.dueDate) <= monthEnd) dueFromInv += inv.pending;
+  // Per-customer metrics for ONE month. Shared by the main table (selected month) and the
+  // month-wise panel (every month) so the two always reconcile for the same month.
+  //  - Received = PURE receipt vouchers (LAKHS → rupees). Cheque returns / credit notes /
+  //    debit notes are NOT netted here — the pipeline folds them into outstanding → invoice
+  //    pending → trend.overdue, i.e. the Due/Overdue side. (Works in local-JSON & Supabase.)
+  //  - openDue = bills due by month-end still OPEN (net of all receipts to date) = the true
+  //    "still to collect". Current/as-of month uses live invoice pending + remaining opening
+  //    balance; past months use the stored month-end snapshot (trend.overdue).
+  //  - Due is shown GROSS of the month's collections (openDue + receipts) so that
+  //    Pending = Due − Received = openDue (no double-count of this month's receipts).
+  const metricsForMonth = useCallback((c: Customer, month: string): Metrics => {
+    const detail = customerDetail[c.id];
+    const mt = detail?.trend.find((t) => t.month === month);
+    const received = (mt?.receipts ?? 0) * 100_000;
+    let outstanding: number;
+    let openDue: number;
+    let dueSoon = 0; // not-yet-overdue bills coming due by month-end (current month only)
+    if (month === asOfMonth) {
+      outstanding = c.outstanding; // as on asOfDate (NET)
+      // openDue = the pipeline's CANONICAL overdue (c.overdue — reconciles to the dashboard,
+      // already capped ≤ outstanding & advance-aware) PLUS bills genuinely coming due before
+      // month-end (not overdue yet). We deliberately do NOT use a raw dueDate ≤ monthEnd sum:
+      // that double-counts advance-suppressed Machine/Head bills (overdueDays=0 with a past
+      // nominal due date) and would diverge from the dashboard's Overdue figure.
+      const monthEnd = monthLabelToEndDate(month);
+      const asOf = new Date(asOfDate);
+      for (const inv of detail?.invoices ?? []) {
+        if (inv.pending > 0 && (inv.overdueDays ?? 0) <= 0) {
+          const dd = new Date(inv.dueDate);
+          if (dd > asOf && dd <= monthEnd) dueSoon += inv.pending;
         }
-        // Opening balance is due since 1-Apr → always counts toward "due upto month end".
-        openDue = dueFromInv + (c.remainingOpeningBalance ?? 0);
-      } else {
-        // Historical as-of that month: read the stored month-end snapshot (LAKHS → rupees).
-        outstanding = (mt?.outstanding ?? 0) * 100_000;
-        openDue = (mt?.overdue ?? 0) * 100_000; // overdue at month-end = open amount due by that month's close
       }
-      // "Due upto month-end" is shown GROSS of this month's collections (= openDue + receipts),
-      // so that Pending = Due − Received = openDue (the genuine still-to-collect). Without the
-      // add-back, this month's receipts would be subtracted twice and understate Pending.
-      const due = openDue + received;
-      return { outstanding, due, received, pending: openDue };
-    };
+      openDue = c.overdue + dueSoon;
+    } else {
+      outstanding = (mt?.outstanding ?? 0) * 100_000;
+      openDue = (mt?.overdue ?? 0) * 100_000;
+    }
+    return { outstanding, due: openDue + received, received, pending: openDue, dueSoon };
+  }, [customerDetail, asOfMonth, asOfDate]);
+
+  // Per-customer metrics for the selected month (feeds the main table + grand total).
+  const customerMetrics = useMemo(() => {
     const map = new Map<string, Metrics>();
-    for (const c of filteredCustomers) map.set(c.id, compute(c));
+    for (const c of filteredCustomers) map.set(c.id, metricsForMonth(c, selectedMonth));
     return map;
-  }, [filteredCustomers, selectedMonth, isCurrentMonth, customerDetail]);
+  }, [filteredCustomers, selectedMonth, metricsForMonth]);
 
   // Group by salesperson
   const spRows = useMemo<SPRow[]>(() => {
@@ -188,6 +208,7 @@ export default function SalespersonCollectionReport() {
       row.m.due         += m.due;
       row.m.received    += m.received;
       row.m.pending     += m.pending;
+      row.m.dueSoon     += m.dueSoon;
     }
     const arr = [...map.values()];
     // Sort children by pending desc for drill-down readability
@@ -212,11 +233,46 @@ export default function SalespersonCollectionReport() {
       t.due         += r.m.due;
       t.received    += r.m.received;
       t.pending     += r.m.pending;
+      t.dueSoon     += r.m.dueSoon;
     }
     // Use the locked NET convention for the headline outstanding in the current month
     if (isCurrentMonth) t.outstanding = sumOutstanding(filteredCustomers);
     return t;
   }, [spRows, filteredCustomers, isCurrentMonth]);
+
+  /* ── Month-wise series for the panel (selected salesperson, or consolidated) ── */
+  interface MonthRow extends Metrics { month: string; sales: number; }
+  const monthlyData = useMemo<MonthRow[]>(() => {
+    const custs = selectedSalesperson
+      ? filteredCustomers.filter((c) => spName(c.salesPerson) === selectedSalesperson)
+      : filteredCustomers;
+    return months.map((m) => {
+      const agg: Metrics = emptyMetrics();
+      let sales = 0;
+      for (const c of custs) {
+        const mm = metricsForMonth(c, m);
+        agg.outstanding += mm.outstanding;
+        agg.due         += mm.due;
+        agg.received    += mm.received;
+        agg.pending     += mm.pending;
+        agg.dueSoon     += mm.dueSoon;
+        sales += (customerDetail[c.id]?.trend.find((x) => x.month === m)?.sales ?? 0) * 100_000;
+      }
+      return { month: m, ...agg, sales };
+    });
+  }, [selectedSalesperson, filteredCustomers, months, customerDetail, metricsForMonth]);
+
+  // Scroll to the panel when a specific salesperson is selected (not on the default view).
+  useEffect(() => {
+    if (selectedSalesperson) panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedSalesperson]);
+
+  // If the selected salesperson is filtered out, revert the panel to consolidated.
+  useEffect(() => {
+    if (selectedSalesperson && !spRows.some((r) => r.salesperson === selectedSalesperson)) {
+      setSelectedSalesperson(null);
+    }
+  }, [spRows, selectedSalesperson]);
 
   /* ── Handlers ── */
   const toggleSort = (key: SortKey) => {
@@ -259,10 +315,10 @@ export default function SalespersonCollectionReport() {
     aoa.push(["Salesperson", "Total Outstanding", dueLabel, receivedLabel, "Total Pending", "Collection %"]);
     for (const r of spRows) {
       const pct = collectionPct(r.m);
-      aoa.push([r.salesperson, r.m.outstanding, r.m.due, r.m.received, r.m.pending, pct === null ? "" : Math.round(pct * 10) / 10]);
+      aoa.push([r.salesperson, startMonthOutstanding(r.m), r.m.due, r.m.received, r.m.pending, pct === null ? "" : Math.round(pct * 10) / 10]);
     }
     const totalPct = collectionPct(totals);
-    aoa.push(["Grand Total", totals.outstanding, totals.due, totals.received, totals.pending, totalPct === null ? "" : Math.round(totalPct * 10) / 10]);
+    aoa.push(["Grand Total", startMonthOutstanding(totals), totals.due, totals.received, totals.pending, totalPct === null ? "" : Math.round(totalPct * 10) / 10]);
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [{ wch: 28 }, { wch: 18 }, { wch: 22 }, { wch: 20 }, { wch: 18 }, { wch: 13 }];
@@ -309,10 +365,15 @@ export default function SalespersonCollectionReport() {
   }
 
   const kpiCards = [
-    { label: "Total Outstanding", value: fmt(totals.outstanding), icon: Wallet,        warn: true  },
+    { label: "Total Outstanding", value: fmt(startMonthOutstanding(totals)), icon: Wallet, warn: true  },
     { label: dueLabel,            value: fmt(totals.due),         icon: CalendarClock,  warn: false },
     { label: receivedLabel,       value: fmt(totals.received),    icon: Coins,          warn: false },
     { label: "Total Pending",     value: fmt(totals.pending),     icon: TrendingDown,   warn: true  },
+    {
+      label: `Due till month-end (${selectedMonth ? monthEndLong(selectedMonth) : "—"})`,
+      value: fmt(totals.dueSoon),
+      icon: CalendarClock, warn: false,
+    },
     {
       label: "Collection %",
       value: collectionPct(totals) === null ? "—" : `${(collectionPct(totals) as number).toFixed(1)}%`,
@@ -407,7 +468,7 @@ export default function SalespersonCollectionReport() {
       </Card>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         {kpiCards.map((kpi) => {
           const Icon = kpi.icon;
           return (
@@ -425,6 +486,9 @@ export default function SalespersonCollectionReport() {
           );
         })}
       </div>
+      <p className="text-[11px] text-muted-foreground -mt-3">
+        Pending = Overdue (matches the dashboard) + "Due till month-end" (bills coming due by {selectedMonth ? monthEndLong(selectedMonth) : "month-end"}). Due = Pending + Received; Outstanding = start-of-month balance.
+      </p>
 
       {/* Main table */}
       <Card className="rounded-card border-border bg-surface overflow-hidden">
@@ -432,7 +496,7 @@ export default function SalespersonCollectionReport() {
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             {spRows.length} salesperson{spRows.length !== 1 ? "s" : ""}
           </span>
-          <span className="text-[11px] text-muted-foreground">Click a salesperson to drill into customers</span>
+          <span className="text-[11px] text-muted-foreground">Click a salesperson to drill into customers + see their monthly trend below</span>
         </div>
         <div className="overflow-x-auto">
           <Table>
@@ -466,7 +530,7 @@ export default function SalespersonCollectionReport() {
                   <TableRow className="bg-muted/60 border-b-2 border-border/60 font-semibold">
                     <TableCell />
                     <TableCell className="text-sm whitespace-nowrap uppercase tracking-wide text-foreground/80">Grand Total</TableCell>
-                    <TableCell className="text-sm text-right font-mono">{fmt(totals.outstanding)}</TableCell>
+                    <TableCell className="text-sm text-right font-mono">{fmt(startMonthOutstanding(totals))}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(totals.due)}</TableCell>
                     <TableCell className="text-sm text-right font-mono">{fmt(totals.received)}</TableCell>
                     <TableCell className={`text-sm text-right font-mono ${totals.pending > 0 ? "text-destructive" : ""}`}>{fmt(totals.pending)}</TableCell>
@@ -477,12 +541,13 @@ export default function SalespersonCollectionReport() {
 
                   {spRows.map((row) => {
                     const isOpen = expanded.has(row.salesperson);
+                    const isSelected = selectedSalesperson === row.salesperson;
                     const pct = collectionPct(row.m);
                     return (
                       <Fragment key={row.salesperson}>
                         <TableRow
-                          className={`transition-colors cursor-pointer ${isOpen ? "bg-primary/5" : "hover:bg-muted/30"}`}
-                          onClick={() => toggleExpand(row.salesperson)}
+                          className={`transition-colors cursor-pointer ${isSelected ? "bg-primary/10" : isOpen ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                          onClick={() => { toggleExpand(row.salesperson); setSelectedSalesperson(row.salesperson); }}
                         >
                           <TableCell className="text-muted-foreground">
                             {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -491,7 +556,7 @@ export default function SalespersonCollectionReport() {
                             {row.salesperson}
                             <span className="ml-1.5 text-[11px] text-muted-foreground">({row.customers.length})</span>
                           </TableCell>
-                          <TableCell className="text-sm text-right font-mono font-semibold">{fmt(row.m.outstanding)}</TableCell>
+                          <TableCell className="text-sm text-right font-mono font-semibold">{fmt(startMonthOutstanding(row.m))}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{fmt(row.m.due)}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{fmt(row.m.received)}</TableCell>
                           <TableCell className={`text-sm text-right font-mono font-semibold ${row.m.pending > 0 ? "text-destructive" : ""}`}>{fmt(row.m.pending)}</TableCell>
@@ -513,7 +578,7 @@ export default function SalespersonCollectionReport() {
                                 {cust.name}
                                 <span className="ml-1.5 text-[10px] opacity-70">{cust.company} · {cust.location}</span>
                               </TableCell>
-                              <TableCell className="text-right font-mono">{fmt(cust.m.outstanding)}</TableCell>
+                              <TableCell className="text-right font-mono">{fmt(startMonthOutstanding(cust.m))}</TableCell>
                               <TableCell className="text-right font-mono">{fmt(cust.m.due)}</TableCell>
                               <TableCell className="text-right font-mono">{fmt(cust.m.received)}</TableCell>
                               <TableCell className={`text-right font-mono ${cust.m.pending > 0 ? "text-destructive/80" : ""}`}>{fmt(cust.m.pending)}</TableCell>
@@ -532,6 +597,128 @@ export default function SalespersonCollectionReport() {
           </Table>
         </div>
       </Card>
+
+      {/* Month-wise analysis panel — consolidated by default, or per selected salesperson */}
+      {(() => {
+        const scopeLabel = selectedSalesperson ?? "All salespersons";
+        // Received is a FLOW → summable across months (= total collected over the period).
+        // Outstanding / Due / Pending are point-in-time STOCKS → not summable; show the latest
+        // (current) month. (Summing them would double-count the same open balance every month.)
+        const sumReceived = monthlyData.reduce((s, d) => s + d.received, 0);
+        const latest = monthlyData[monthlyData.length - 1];
+        const latestPct = latest ? collectionPct(latest) : null;
+        const chartData = monthlyData.map((d) => ({
+          month: d.month,
+          Due: d.due,
+          Received: d.received,
+          Pending: d.pending,
+          "Collection %": collectionPct(d) ?? 0,
+        }));
+        return (
+          <Card ref={panelRef} className="rounded-card border-border bg-surface overflow-hidden scroll-mt-4">
+            <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <BarChart3 className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide truncate">
+                  Monthly analysis — {scopeLabel}
+                </span>
+              </div>
+              {selectedSalesperson && (
+                <Button
+                  variant="ghost" size="sm"
+                  className="h-7 px-2 text-xs rounded-button text-muted-foreground hover:text-foreground shrink-0"
+                  onClick={() => setSelectedSalesperson(null)}
+                >
+                  <X className="h-3.5 w-3.5 mr-1" /> Show all
+                </Button>
+              )}
+            </div>
+
+            {/* Chart */}
+            <div className="p-4 border-b border-border">
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    yAxisId="left"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) => `${(v / 10000000).toFixed(1)}`}
+                    label={{ value: "₹ Cr", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[0, 100]}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) => `${v}%`}
+                  />
+                  <Tooltip
+                    formatter={(value: number, name: string) =>
+                      name === "Collection %" ? `${value.toFixed(1)}%` : fmt(value)
+                    }
+                    contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line yAxisId="left"  type="monotone" dataKey="Due"      stroke="hsl(217, 91%, 60%)" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line yAxisId="left"  type="monotone" dataKey="Received" stroke="hsl(142, 71%, 45%)" strokeWidth={2} dot={{ r: 2 }} />
+                  <Line yAxisId="left"  type="monotone" dataKey="Pending"  stroke="hsl(0, 84%, 60%)"  strokeWidth={2} dot={{ r: 2 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="Collection %" stroke="hsl(28, 80%, 52%)" strokeWidth={2} strokeDasharray="4 2" dot={{ r: 2 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Month table */}
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="text-xs font-semibold text-foreground/70 whitespace-nowrap">Month</TableHead>
+                    <TableHead className="text-xs font-semibold text-foreground/70 text-right whitespace-nowrap">Outstanding</TableHead>
+                    <TableHead className="text-xs font-semibold text-foreground/70 text-right whitespace-nowrap">Due</TableHead>
+                    <TableHead className="text-xs font-semibold text-foreground/70 text-right whitespace-nowrap">Received</TableHead>
+                    <TableHead className="text-xs font-semibold text-foreground/70 text-right whitespace-nowrap">Pending</TableHead>
+                    <TableHead className="text-xs font-semibold text-foreground/70 text-right whitespace-nowrap">Collection %</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {monthlyData.map((d) => {
+                    const pct = collectionPct(d);
+                    return (
+                      <TableRow key={d.month} className="hover:bg-muted/30 transition-colors">
+                        <TableCell className="text-sm font-medium whitespace-nowrap">{d.month}</TableCell>
+                        <TableCell className="text-sm text-right font-mono">{fmt(startMonthOutstanding(d))}</TableCell>
+                        <TableCell className="text-sm text-right font-mono">{fmt(d.due)}</TableCell>
+                        <TableCell className="text-sm text-right font-mono">{fmt(d.received)}</TableCell>
+                        <TableCell className={`text-sm text-right font-mono ${d.pending > 0 ? "text-destructive" : ""}`}>{fmt(d.pending)}</TableCell>
+                        <TableCell className={`text-sm text-right font-mono ${pctStyle(pct)}`}>
+                          {pct === null ? "—" : `${pct.toFixed(1)}%`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {monthlyData.length > 0 && (
+                    <TableRow className="bg-muted/60 border-t-2 border-border/60 font-semibold">
+                      <TableCell className="text-sm uppercase tracking-wide text-foreground/80">Total</TableCell>
+                      <TableCell className="text-sm text-right font-mono">{latest ? fmt(startMonthOutstanding(latest)) : "—"}</TableCell>
+                      <TableCell className="text-sm text-right font-mono">{latest ? fmt(latest.due) : "—"}</TableCell>
+                      <TableCell className="text-sm text-right font-mono">{fmt(sumReceived)}</TableCell>
+                      <TableCell className={`text-sm text-right font-mono ${(latest?.pending ?? 0) > 0 ? "text-destructive" : ""}`}>{fmt(latest?.pending ?? 0)}</TableCell>
+                      <TableCell className={`text-sm text-right font-mono ${pctStyle(latestPct)}`}>
+                        {latestPct === null ? "—" : `${latestPct.toFixed(1)}%`}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border">
+              Outstanding = start-of-month balance (so it is always ≥ Due, the part of it due by month-end); Pending = Due − Received.
+              Total row: Received = total collected across the months shown; Outstanding, Due, Pending &amp; Collection % = latest month ({latest?.month ?? "—"}) — balances aren't summed across months as they'd double-count.
+            </div>
+          </Card>
+        );
+      })()}
     </div>
   );
 }

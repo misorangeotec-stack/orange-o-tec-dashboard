@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import {
   ArrowLeft, Download, ShieldAlert, Clock, AlertTriangle,
   CreditCard, TrendingUp, RefreshCw, BookOpen, Building2, ChevronDown, X, Search,
-  ArrowUpDown, ArrowUp, ArrowDown,
+  ArrowUpDown, ArrowUp, ArrowDown, Columns3, Loader2,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useAppData, consolidateByName, consolidateByGroup } from "@/lib/useAppData";
 import { utilizationPct } from "@/lib/receivables";
+import { exportCustomerPdf, exportCustomerXlsx } from "@/lib/exportCustomer";
 import type { InvoiceStatus } from "@/lib/types";
 
 /* ── Types ─────────────────────────────────────────────── */
@@ -98,6 +99,18 @@ const trendTabs = [
 
 const allLines = trendTabs.filter((t) => t.key !== "all");
 
+// Toggleable columns for the Monthly Analysis table (Month is always shown as the row anchor)
+const MONTHLY_COLS = [
+  { key: "sales",              label: "Sales" },
+  { key: "receipts",           label: "Receipts" },
+  { key: "creditNotes",        label: "Credit Notes" },
+  { key: "debitNotes",         label: "Debit Notes" },
+  { key: "journalAdjustments", label: "Journal (Net)" },
+  { key: "checkReturns",       label: "Chq Returns" },
+  { key: "outstanding",        label: "Outstanding" },
+  { key: "overdue",            label: "Overdue" },
+] as const;
+
 /* ── Component ─────────────────────────────────────────── */
 
 export default function CustomerDetail() {
@@ -126,6 +139,12 @@ export default function CustomerDetail() {
   const [agingBucketFilter, setAgingBucketFilter] = useState<string | null>(null);
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [monthlyOpen, setMonthlyOpen] = useState(false);
+  const [monthlyCols, setMonthlyCols] = useState<Set<string>>(
+    () => new Set(MONTHLY_COLS.map((c) => c.key)),
+  );
+  const exportTopRef = useRef<HTMLDivElement>(null);
+  const exportMonthlyRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
   const [invoicesOpen, setInvoicesOpen] = useState(false);
   const [invoicePage, setInvoicePage] = useState(1);
   const INVOICES_PER_PAGE = 15;
@@ -151,7 +170,7 @@ export default function CustomerDetail() {
     lastInitKey.current = "";  // force re-init under the new route
   }, [decoded, isGroupRoute]);
 
-  const { loading, error, allCustomers, customerDetail, customerGroupMap } = useAppData({ saleType: saleTypeFilter });
+  const { loading, error, allCustomers, customerDetail, customerGroupMap, dashboard } = useAppData({ saleType: saleTypeFilter });
 
   // Resolve the list of Tally names that belong to this group (only meaningful
   // on the group route). A group's children are: every Tally name `n` such
@@ -746,6 +765,82 @@ export default function CustomerDetail() {
     },
   ];
 
+  const handleExport = async () => {
+    if (!customer || exporting) return;
+    setExporting(true);
+
+    // Expand the collapsible sections so they render into the captured region.
+    const prev = { trend: trendOpen, aging: agingOpen, monthly: monthlyOpen };
+    setTrendOpen(true);
+    setAgingOpen(true);
+    setMonthlyOpen(true);
+    // Let the collapsibles open and Recharts draw before capture.
+    await new Promise((r) => setTimeout(r, 500));
+
+    try {
+      const meta = {
+        customerName: isGroupRoute ? groupName : customer.name,
+        company: entityCompany === "all" ? "All Companies" : entityCompany,
+        location: entityLocation === "all" ? "All Locations" : entityLocation,
+        asOfDate: dashboard?.asOfDate,
+      };
+
+      // Monthly Analysis — only the columns currently shown on screen (in ₹).
+      const toRupees = (lakhs: number) => Math.round(lakhs * 100_000);
+      const selectedCols = MONTHLY_COLS.filter((c) => monthlyCols.has(c.key));
+      const monthlyColumns = ["Month", ...selectedCols.map((c) => c.label)];
+      const monthlyRows = trendData.map((row) => [
+        row.month,
+        ...selectedCols.map((c) => {
+          const v = Number((row as Record<string, number>)[c.key] ?? 0);
+          return c.key === "outstanding" ? toRupees(Math.abs(v)) : toRupees(v);
+        }),
+      ]);
+      const last = trendData[trendData.length - 1] as Record<string, number> | undefined;
+      const monthlySummary = trendData.length
+        ? ["Summary", ...selectedCols.map((c) => {
+            if (c.key === "outstanding" || c.key === "overdue")
+              return toRupees(Math.abs(Number(last?.[c.key] ?? 0)));
+            return toRupees(trendData.reduce((s, r) => s + Number((r as Record<string, number>)[c.key] ?? 0), 0));
+          })]
+        : undefined;
+
+      // Overdue aging (already in ₹).
+      const agingLabels: Record<string, string> = {
+        "0_30": "0–30 days", "31_60": "31–60 days", "61_90": "61–90 days",
+        "91_120": "91–120 days", "121_180": "121–180 days", "180_plus": "180+ days",
+      };
+      const buckets = customer.agingBuckets as Record<string, number> | undefined;
+      const aging = buckets
+        ? Object.entries(agingLabels)
+            .map(([k, label]) => ({ bucket: label, amount: Math.round(buckets[k] ?? 0) }))
+            .filter((a) => a.amount !== 0)
+        : [];
+
+      // KPI cards as displayed.
+      const kpis = summaryItems.map((k) => ({
+        label: k.label,
+        value: k.drCr ? `${k.value} (${k.drCr})` : k.value,
+      }));
+
+      await exportCustomerPdf([exportTopRef.current, exportMonthlyRef.current], meta);
+      exportCustomerXlsx({
+        meta, kpis, aging,
+        monthly: { columns: monthlyColumns, rows: monthlyRows, summary: monthlySummary },
+      });
+
+      toast({ title: "Export complete", description: "PDF and Excel downloaded." });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Export failed", description: String((e as Error)?.message ?? e), variant: "destructive" });
+    } finally {
+      setTrendOpen(prev.trend);
+      setAgingOpen(prev.aging);
+      setMonthlyOpen(prev.monthly);
+      setExporting(false);
+    }
+  };
+
 
   return (
     <div className="p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -799,6 +894,14 @@ export default function CustomerDetail() {
                   </Badge>
                 )}
               </div>
+              {!isGroupRoute && allEntities.length === 1 && (
+                <p className="flex items-center gap-1.5 text-sm text-muted-foreground mt-0.5">
+                  <Building2 className="h-3.5 w-3.5 shrink-0" />
+                  <span>{customer.company}</span>
+                  <span className="text-muted-foreground/50">·</span>
+                  <span>{customer.location}</span>
+                </p>
+              )}
               {customer.blocked && (
                 <p className="text-[11px] text-muted-foreground/80 italic mt-1">
                   Note: "Blocked" is set when the source-sheet credit limit equals 1. In practice this marker is used for the INK product category only.
@@ -904,14 +1007,18 @@ export default function CustomerDetail() {
         <div className="flex items-end gap-2">
           <Button
             variant="outline" size="sm"
-            onClick={() => toast({ title: "Export started" })}
+            onClick={handleExport}
+            disabled={exporting}
             className="rounded-button border-border"
           >
-            <Download className="h-4 w-4 mr-2" /> Export
+            {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+            {exporting ? "Exporting…" : "Export"}
           </Button>
         </div>
       </div>
 
+      {/* Export region 1: KPI cards → Trends → Aging */}
+      <div ref={exportTopRef} className="space-y-6 bg-background">
       {/* KPI Summary — clickable cards apply a filter to the Transactions ledger */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {summaryItems.map((item) => {
@@ -1251,21 +1358,57 @@ export default function CustomerDetail() {
           </Collapsible>
         );
       })()}
+      </div>
+      {/* End export region 1 */}
 
+      {/* Export region 2: Monthly Analysis (starts on a new PDF page) */}
+      <div ref={exportMonthlyRef} className="bg-background">
       {/* Monthly Analysis Table */}
       <Collapsible open={monthlyOpen} onOpenChange={setMonthlyOpen}>
       <Card className="rounded-card border-border bg-surface overflow-hidden">
         <CardHeader className="pb-3">
-          <CollapsibleTrigger asChild>
-            <button className="flex items-center justify-between w-full text-left">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-primary" />
-                Monthly Analysis
-                <span className="text-xs font-normal text-muted-foreground ml-1">— click a row to view ledger</span>
-              </CardTitle>
-              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${monthlyOpen ? "rotate-180" : ""}`} />
-            </button>
-          </CollapsibleTrigger>
+          <div className="flex items-center justify-between gap-2">
+            <CollapsibleTrigger asChild>
+              <button className="flex items-center justify-between flex-1 text-left">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-primary" />
+                  Monthly Analysis
+                  <span className="text-xs font-normal text-muted-foreground ml-1">— click a row to view ledger</span>
+                </CardTitle>
+                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${monthlyOpen ? "rotate-180" : ""}`} />
+              </button>
+            </CollapsibleTrigger>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button data-export-hide variant="outline" size="sm" className="h-8 gap-1.5 text-xs shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <Columns3 className="h-3.5 w-3.5" />
+                  Columns
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel className="text-xs">Show columns</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {MONTHLY_COLS.map((col) => (
+                  <DropdownMenuCheckboxItem
+                    key={col.key}
+                    className="text-xs"
+                    checked={monthlyCols.has(col.key)}
+                    onSelect={(e) => e.preventDefault()}
+                    onCheckedChange={(checked) =>
+                      setMonthlyCols((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(col.key);
+                        else next.delete(col.key);
+                        return next;
+                      })
+                    }
+                  >
+                    {col.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </CardHeader>
         <CollapsibleContent>
         <div className="overflow-x-auto">
@@ -1273,20 +1416,15 @@ export default function CustomerDetail() {
             <TableHeader>
               <TableRow className="bg-muted/50">
                 <TableHead className="text-xs font-semibold text-foreground/70">Month</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Sales</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Receipts</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Credit Notes</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Debit Notes</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Journal (Net)</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Chq Returns</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Outstanding</TableHead>
-                <TableHead className="text-xs font-semibold text-foreground/70 text-right">Overdue</TableHead>
+                {MONTHLY_COLS.filter((c) => monthlyCols.has(c.key)).map((c) => (
+                  <TableHead key={c.key} className="text-xs font-semibold text-foreground/70 text-right">{c.label}</TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {trendData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                  <TableCell colSpan={monthlyCols.size + 1} className="text-center py-8 text-muted-foreground text-sm">
                     No monthly data available.
                   </TableCell>
                 </TableRow>
@@ -1304,25 +1442,27 @@ export default function CustomerDetail() {
                           <BookOpen className="h-3 w-3 text-muted-foreground opacity-60" />
                         </span>
                       </TableCell>
-                      <TableCell className="text-sm text-right font-mono">{fmtL(row.sales)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono">{fmtL(row.receipts)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono">{fmtL(row.creditNotes)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono text-[hsl(28,80%,55%)]">{fmtL(row.debitNotes ?? 0)}</TableCell>
-                      <TableCell className={`text-sm text-right font-mono ${(row.journalAdjustments ?? 0) > 0 ? "text-destructive" : (row.journalAdjustments ?? 0) < 0 ? "text-emerald-700" : "text-muted-foreground"}`}>
-                        {fmtLDrCr(row.journalAdjustments ?? 0)}
-                      </TableCell>
-                      <TableCell className="text-sm text-right font-mono text-[hsl(213,94%,52%)] font-semibold">{fmtL(row.checkReturns)}</TableCell>
-                      <TableCell className="text-sm text-right font-mono">{fmtL(Math.abs(row.outstanding))}</TableCell>
-                      <TableCell className="text-sm text-right font-mono text-destructive font-semibold">{fmtL(row.overdue)}</TableCell>
+                      {monthlyCols.has("sales") && <TableCell className="text-sm text-right font-mono">{fmtL(row.sales)}</TableCell>}
+                      {monthlyCols.has("receipts") && <TableCell className="text-sm text-right font-mono">{fmtL(row.receipts)}</TableCell>}
+                      {monthlyCols.has("creditNotes") && <TableCell className="text-sm text-right font-mono">{fmtL(row.creditNotes)}</TableCell>}
+                      {monthlyCols.has("debitNotes") && <TableCell className="text-sm text-right font-mono text-[hsl(28,80%,55%)]">{fmtL(row.debitNotes ?? 0)}</TableCell>}
+                      {monthlyCols.has("journalAdjustments") && (
+                        <TableCell className={`text-sm text-right font-mono ${(row.journalAdjustments ?? 0) > 0 ? "text-destructive" : (row.journalAdjustments ?? 0) < 0 ? "text-emerald-700" : "text-muted-foreground"}`}>
+                          {fmtLDrCr(row.journalAdjustments ?? 0)}
+                        </TableCell>
+                      )}
+                      {monthlyCols.has("checkReturns") && <TableCell className="text-sm text-right font-mono text-[hsl(213,94%,52%)] font-semibold">{fmtL(row.checkReturns)}</TableCell>}
+                      {monthlyCols.has("outstanding") && <TableCell className="text-sm text-right font-mono">{fmtL(Math.abs(row.outstanding))}</TableCell>}
+                      {monthlyCols.has("overdue") && <TableCell className="text-sm text-right font-mono text-destructive font-semibold">{fmtL(row.overdue)}</TableCell>}
                     </TableRow>
                   ))}
                   <TableRow className="bg-muted/50 font-semibold border-t-2 border-border">
                     <TableCell className="text-sm font-bold">Summary</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.sales, 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.receipts, 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.creditNotes, 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold text-[hsl(28,80%,55%)]">{fmtL(trendData.reduce((s, r) => s + (r.debitNotes ?? 0), 0))}</TableCell>
-                    {(() => {
+                    {monthlyCols.has("sales") && <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.sales, 0))}</TableCell>}
+                    {monthlyCols.has("receipts") && <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.receipts, 0))}</TableCell>}
+                    {monthlyCols.has("creditNotes") && <TableCell className="text-sm text-right font-mono font-bold">{fmtL(trendData.reduce((s, r) => s + r.creditNotes, 0))}</TableCell>}
+                    {monthlyCols.has("debitNotes") && <TableCell className="text-sm text-right font-mono font-bold text-[hsl(28,80%,55%)]">{fmtL(trendData.reduce((s, r) => s + (r.debitNotes ?? 0), 0))}</TableCell>}
+                    {monthlyCols.has("journalAdjustments") && (() => {
                       const totJ = trendData.reduce((s, r) => s + (r.journalAdjustments ?? 0), 0);
                       return (
                         <TableCell className={`text-sm text-right font-mono font-bold ${totJ > 0 ? "text-destructive" : totJ < 0 ? "text-emerald-700" : ""}`}>
@@ -1330,9 +1470,9 @@ export default function CustomerDetail() {
                         </TableCell>
                       );
                     })()}
-                    <TableCell className="text-sm text-right font-mono font-bold text-[hsl(213,94%,52%)]">{fmtL(trendData.reduce((s, r) => s + r.checkReturns, 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold">{fmtL(Math.abs(trendData[trendData.length - 1]?.outstanding ?? 0))}</TableCell>
-                    <TableCell className="text-sm text-right font-mono font-bold text-destructive">{fmtL(trendData[trendData.length - 1]?.overdue ?? 0)}</TableCell>
+                    {monthlyCols.has("checkReturns") && <TableCell className="text-sm text-right font-mono font-bold text-[hsl(213,94%,52%)]">{fmtL(trendData.reduce((s, r) => s + r.checkReturns, 0))}</TableCell>}
+                    {monthlyCols.has("outstanding") && <TableCell className="text-sm text-right font-mono font-bold">{fmtL(Math.abs(trendData[trendData.length - 1]?.outstanding ?? 0))}</TableCell>}
+                    {monthlyCols.has("overdue") && <TableCell className="text-sm text-right font-mono font-bold text-destructive">{fmtL(trendData[trendData.length - 1]?.overdue ?? 0)}</TableCell>}
                   </TableRow>
                 </>
               )}
@@ -1342,6 +1482,8 @@ export default function CustomerDetail() {
         </CollapsibleContent>
       </Card>
       </Collapsible>
+      </div>
+      {/* End export region 2 */}
 
       {/* Opening Balance */}
       <div ref={obSectionRef}>
