@@ -1,4 +1,4 @@
-import { BarChart3, Bell, ShieldAlert, FileText, Bookmark, User, Globe, PackageOpen, UserCheck, Settings as SettingsIcon } from "lucide-react";
+import { BarChart3, Bell, ShieldAlert, FileText, Bookmark, User, Globe, PackageOpen, UserCheck, HandCoins, Settings as SettingsIcon } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -18,6 +18,7 @@ const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: BarChart3 },
   { title: "Risk Register", url: "/dashboard/risk-register", icon: ShieldAlert },
   { title: "Salesperson Analysis", url: "/dashboard/salesperson-analysis", icon: UserCheck },
+  { title: "Salesperson Collection Report", url: "/dashboard/salesperson-collection", icon: HandCoins },
   { title: "Import Data", url: "/dashboard/import", icon: PackageOpen },
   { title: "Settings", url: "/dashboard/settings", icon: SettingsIcon },
   // Hidden for client demo — restore when ready:

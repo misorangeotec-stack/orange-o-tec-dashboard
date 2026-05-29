@@ -18,6 +18,7 @@ import Dashboard from "./pages/Dashboard.tsx";
 import Alerts from "./pages/Alerts.tsx";
 import CustomerRiskRegister from "./pages/CustomerRiskRegister.tsx";
 import SalespersonAnalysis from "./pages/SalespersonAnalysis.tsx";
+import SalespersonCollectionReport from "./pages/SalespersonCollectionReport.tsx";
 import CustomerDetail from "./pages/CustomerDetail.tsx";
 import Reports from "./pages/Reports.tsx";
 import SavedViews from "./pages/SavedViews.tsx";
@@ -45,6 +46,7 @@ const App = () => (
             <Route path="alerts" element={<Alerts />} />
             <Route path="risk-register" element={<CustomerRiskRegister />} />
             <Route path="salesperson-analysis" element={<SalespersonAnalysis />} />
+            <Route path="salesperson-collection" element={<SalespersonCollectionReport />} />
             <Route path="customer/:id" element={<CustomerDetail />} />
             <Route path="group/:id" element={<CustomerDetail />} />
             <Route path="exim" element={<EximDashboard />} />
